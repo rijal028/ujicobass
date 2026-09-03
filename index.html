@@ -18,6 +18,7 @@
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
+        .preview-img { max-width: 100%; border-radius: 6px; margin-top: 12px; border: 1px solid #475569; display: none; }
     </style>
 </head>
 <body>
@@ -27,7 +28,7 @@
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
-        <input type="text" id="keyInput" placeholder="Example: 1725166800000_2944x2944">
+        <input type="text" id="keyInput" placeholder="Example: 1788254684998_2560x1920">
     </div>
 
     <div class="input-group">
@@ -36,6 +37,8 @@
     </div>
 
     <button onclick="verifyImage()">Verify Authenticity</button>
+
+    <img id="cropPreview" class="preview-img" alt="Auto-crop debug preview">
 
     <div id="resultBox" class="result-box">
         <div id="resultTitle" style="font-weight: bold; font-size: 1.1rem;"></div>
@@ -49,7 +52,6 @@
     const BLOCK_SIZE = 16;
     const SCATTER_RATIO = 0.08;
 
-    // Precomputed 16x16 DCT Matrices
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const invSqrtN = 1.0 / Math.sqrt(BLOCK_SIZE);
@@ -103,14 +105,79 @@
         }
     }
 
-    function getLumaAt(data, width, height, x, y) {
-        const px = Math.max(0, Math.min(width - 1, Math.floor(x)));
-        const py = Math.max(0, Math.min(height - 1, Math.floor(y)));
-        const idx = (py * width + px) * 4;
+    function getLuma(data, width, x, y) {
+        const idx = (y * width + x) * 4;
         return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
     }
 
-    function auditImage(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    // Deteksi cerdas tepi gambar riil di tengah bilah hitam
+    function findActualPhotoBounds(data, width, height, targetAspect) {
+        // Cek apakah ada bilah hitam khas letterbox screenshot
+        // Periksa 3 sampel baris horizontal di area 25% dan 75% ketinggian layar
+        function isRowDarkLetterbox(y) {
+            let nonBlack = 0;
+            for (let x = 60; x < width - 60; x += 20) {
+                const idx = (y * width + x) * 4;
+                if (data[idx] > 18 || data[idx+1] > 18 || data[idx+2] > 18) {
+                    nonBlack++;
+                }
+            }
+            return nonBlack < 4; // Lebih dari 90% piksel adalah hitam pekat
+        }
+
+        const midX = Math.floor(width / 2);
+        let topEdge = -1;
+        let bottomEdge = -1;
+
+        // Cari batas atas: lewati area status bar (0-200px), cari di mana piksel hitam berubah menjadi foto
+        for (let y = 180; y < Math.floor(height * 0.55); y++) {
+            const isDark = isRowDarkLetterbox(y);
+            const isNextDark = isRowDarkLetterbox(y + 2);
+            if (isDark && !isNextDark) {
+                topEdge = y + 2;
+                break;
+            }
+        }
+
+        // Cari batas bawah: dari 90% layar naik ke atas
+        for (let y = Math.floor(height * 0.90); y > Math.floor(height * 0.45); y--) {
+            const isDark = isRowDarkLetterbox(y);
+            const isPrevDark = isRowDarkLetterbox(y - 2);
+            if (isDark && !isPrevDark) {
+                bottomEdge = y - 2;
+                break;
+            }
+        }
+
+        // Jika transisi terdeteksi valid
+        if (topEdge > 0 && bottomEdge > topEdge && (bottomEdge - topEdge) > 200) {
+            const cropH = bottomEdge - topEdge + 1;
+            return {
+                isScreenshot: true,
+                x: 0,
+                y: topEdge,
+                w: width,
+                h: cropH
+            };
+        }
+
+        // Fallback: Gunakan estimasi aspek rasio eksak jika auto edge tidak sempurna
+        const expectedH = Math.round(width / targetAspect);
+        if (expectedH < height * 0.85) {
+            const fallbackY = Math.round((height - expectedH) / 2);
+            return {
+                isScreenshot: true,
+                x: 0,
+                y: fallbackY,
+                w: width,
+                h: expectedH
+            };
+        }
+
+        return { isScreenshot: false, x: 0, y: 0, w: width, h: height };
+    }
+
+    function auditImage(data, width, height, targetWidth, targetHeight, keyString) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
@@ -131,49 +198,37 @@
 
                 let blockSumLuma = 0.0;
 
-                if (!isDownscaled) {
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const rowIdx = ((by + y) * width + bx) * 4;
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const p = rowIdx + (x * 4);
-                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
-                        }
-                    }
-                } else {
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const startY = (by + y) * scaleY;
-                        const endY = (by + y + 1) * scaleY;
+                for (let y = 0; y < BLOCK_SIZE; y++) {
+                    const startY = (by + y) * scaleY;
+                    const endY = (by + y + 1) * scaleY;
 
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const startX = (bx + x) * scaleX;
-                            const endX = (bx + x + 1) * scaleX;
+                    for (let x = 0; x < BLOCK_SIZE; x++) {
+                        const startX = (bx + x) * scaleX;
+                        const endX = (bx + x + 1) * scaleX;
 
-                            let subLumaSum = 0.0;
-                            let subSamples = 0;
+                        let subLumaSum = 0.0;
+                        let subSamples = 0;
 
-                            const minSY = Math.max(0, Math.floor(startY));
-                            const maxSY = Math.min(height - 1, Math.floor(endY));
-                            const minSX = Math.max(0, Math.floor(startX));
-                            const maxSX = Math.min(width - 1, Math.floor(endX));
+                        const minSY = Math.max(0, Math.floor(startY));
+                        const maxSY = Math.min(height - 1, Math.floor(endY));
+                        const minSX = Math.max(0, Math.floor(startX));
+                        const maxSX = Math.min(width - 1, Math.floor(endX));
 
-                            for (let sy = minSY; sy <= maxSY; sy++) {
-                                const rowOffset = sy * width * 4;
-                                for (let sx = minSX; sx <= maxSX; sx++) {
-                                    const p = rowOffset + (sx * 4);
-                                    subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                                    subSamples++;
-                                }
+                        for (let sy = minSY; sy <= maxSY; sy++) {
+                            const rowOffset = sy * width * 4;
+                            for (let sx = minSX; sx <= maxSX; sx++) {
+                                const p = rowOffset + (sx * 4);
+                                subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                                subSamples++;
                             }
-
-                            const luma = subSamples > 0 
-                                ? (subLumaSum / subSamples) 
-                                : getLumaAt(data, width, height, (startX + endX) / 2.0, (startY + endY) / 2.0);
-
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
                         }
+
+                        const luma = subSamples > 0 
+                            ? (subLumaSum / subSamples) 
+                            : getLuma(data, width, Math.floor((startX + endX) / 2), Math.floor((startY + endY) / 2));
+
+                        blockSumLuma += luma;
+                        blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
                     }
                 }
 
@@ -219,14 +274,10 @@
         const resultBox = document.getElementById('resultBox');
         const resultTitle = document.getElementById('resultTitle');
         const resultMeta = document.getElementById('resultMeta');
+        const cropPreview = document.getElementById('cropPreview');
 
         if (!rawKeyInput || !fileInput.files[0]) {
-            alert('Please enter the Master Key and select an image file!');
-            return;
-        }
-
-        if (!rawKeyInput.includes('_') || !rawKeyInput.includes('x')) {
-            alert('Invalid Key Format! The Master Key MUST include dimensions (e.g. 1725166800000_2944x2944).');
+            alert('Please enter Master Key and select file!');
             return;
         }
 
@@ -239,79 +290,49 @@
 
                 const canvas = document.getElementById('canvas');
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
                 canvas.width = nativeWidth;
                 canvas.height = nativeHeight;
                 ctx.drawImage(img, 0, 0, nativeWidth, nativeHeight);
 
-                // Ekstrak dimensi kanonik dari Master Key
                 const parts = rawKeyInput.split('_');
                 const dimParts = parts[parts.length - 1].split('x');
                 const canonicalWidth = parseInt(dimParts[0], 10);
                 const canonicalHeight = parseInt(dimParts[1], 10);
+                const canonicalAspect = canonicalWidth / canonicalHeight;
 
-                if (isNaN(canonicalWidth) || isNaN(canonicalHeight) || canonicalWidth <= 0 || canonicalHeight <= 0) {
-                    alert('Failed to parse dimensions from Master Key!');
-                    return;
-                }
+                const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
-                const screenRatio = nativeWidth / nativeHeight;
-                const canonicalRatio = canonicalWidth / canonicalHeight;
-
-                // Cek apakah ada disparitas rasio layar signifikan (khas screenshot galeri)
-                const isScreenshotAspectMismatch = Math.abs(screenRatio - canonicalRatio) > 0.05;
+                // Cari batas foto asli di dalam screenshot
+                const bounds = findActualPhotoBounds(rawData, nativeWidth, nativeHeight, canonicalAspect);
 
                 let res, mode, threshold;
 
-                if (isScreenshotAspectMismatch) {
-                    // Hitung secara matematis letak foto di dalam screenshot
-                    let photoDisplayW, photoDisplayH, offsetX, offsetY;
-
-                    if (screenRatio < canonicalRatio) {
-                        // Layar lebih sempit memanjang (Portrait HP standar, misal 1080x2460 vs 1:1 atau 4:3)
-                        // Foto menempel penuh pada lebar layar kiri-kanan
-                        photoDisplayW = nativeWidth;
-                        photoDisplayH = Math.round(nativeWidth / canonicalRatio);
-                        offsetX = 0;
-                        offsetY = Math.round((nativeHeight - photoDisplayH) / 2);
-                    } else {
-                        // Layar lebih lebar (misal screenshot landscape)
-                        photoDisplayH = nativeHeight;
-                        photoDisplayW = Math.round(nativeHeight * canonicalRatio);
-                        offsetX = Math.round((nativeWidth - photoDisplayW) / 2);
-                        offsetY = 0;
-                    }
-
-                    // Potong hanya area foto murni di tengah layar dan resample ke ukuran kanonik
+                if (bounds.isScreenshot) {
                     const cropCanvas = document.createElement('canvas');
                     cropCanvas.width = canonicalWidth;
                     cropCanvas.height = canonicalHeight;
                     const cropCtx = cropCanvas.getContext('2d');
 
+                    // Crop area foto murni di tengah dan rescale ke dimensi kanonik
                     cropCtx.drawImage(
                         canvas,
-                        offsetX, offsetY, photoDisplayW, photoDisplayH,
+                        bounds.x, bounds.y, bounds.w, bounds.h,
                         0, 0, canonicalWidth, canonicalHeight
                     );
 
+                    // Tampilkan preview foto yang berhasil di-crop agar terlihat di layar
+                    cropPreview.src = cropCanvas.toDataURL();
+                    cropPreview.style.display = 'block';
+
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-
-                    res = auditImage(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Mathematical Auto-Center (${photoDisplayW}x${photoDisplayH} @ offset Y:${offsetY}px) &rarr; Canonical Locked Grid (${canonicalWidth}x${canonicalHeight})`;
-                    threshold = 62.0; // Toleransi interpolasi GPU display
+                    res = auditImage(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} @ Y:${bounds.y}) &rarr; Canonical Re-aligned (${canonicalWidth}x${canonicalHeight})`;
+                    threshold = 60.0;
                 } else {
-                    const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
-                    const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
-
-                    if (isExactNative) {
-                        res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Original Native Capture (${nativeWidth}x${nativeHeight}) [${canonicalWidth/16}x${canonicalHeight/16} Macroblocks]`;
-                        threshold = 85.0;
-                    } else {
-                        res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; Locked Grid ${canonicalWidth}x${canonicalHeight})`;
-                        threshold = 68.0;
-                    }
+                    cropPreview.style.display = 'none';
+                    res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput);
+                    mode = `Direct Camera Image (${nativeWidth}x${nativeHeight})`;
+                    threshold = 68.0;
                 }
 
                 resultBox.style.display = 'block';
@@ -327,9 +348,9 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Detection Mode:</b> ${mode}<br>
-                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)} (Target Nominal: 24.0)<br>
+                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
                     <b>Matched Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Authenticity Threshold:</b> &ge; ${threshold.toFixed(2)}% (Random Baseline = 50.00%)
+                    <b>Threshold:</b> &ge; ${threshold.toFixed(2)}%
                 `;
             };
             img.src = e.target.result;
