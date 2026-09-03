@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Forensic Regional Verifier</title>
+    <title>SecurePixel 8x8 Granular Regional Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -23,10 +23,10 @@
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
 
         .heatmap-box { margin-top: 16px; text-align: center; display: none; }
-        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(4, 72px); gap: 6px; padding: 10px; background: #020617; border-radius: 8px; border: 1px solid #334155; margin-top: 6px; }
-        .heatmap-cell { width: 72px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border-radius: 4px; }
+        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(8, 46px); gap: 3px; padding: 8px; background: #020617; border-radius: 8px; border: 1px solid #334155; margin-top: 6px; }
+        .heatmap-cell { width: 46px; height: 32px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; border-radius: 3px; }
         .cell-pass { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; }
-        .cell-tamper { background: rgba(239, 68, 68, 0.35); border: 1px solid #ef4444; color: #fca5a5; }
+        .cell-tamper { background: rgba(239, 68, 68, 0.45); border: 1px solid #ef4444; color: #fca5a5; }
 
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
         .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Regional Forensic Verifier</h1>
+    <h1>SecurePixel 8x8 Granular Forensic Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,7 +50,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Authenticity & Regional Integrity</button>
+    <button onclick="verifyImage()">Audit 64-Zone Regional Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -58,7 +58,7 @@
     </div>
 
     <div id="heatmapBox" class="heatmap-box">
-        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Regional Disparity Map (4x4 Quadrants)</span><br>
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Regional Disparity Map (8x8 Granular Grid)</span><br>
         <div id="heatmapGrid" class="heatmap-grid"></div>
     </div>
 
@@ -73,7 +73,7 @@
 <script>
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 0.35; 
-    const REGION_GRID = 4; // 4x4 = 16 Zona Wilayah Terdistribusi
+    const REGION_GRID = 8; // 8x8 = 64 Zona Mikro
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -162,7 +162,7 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImageRegional(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    function auditImage8x8Regional(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
@@ -304,12 +304,11 @@
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        // Hitung Skor Tiap Region 4x4
         const regionScores = [];
         let minRegionScore = 100.0;
 
         for (let i = 0; i < totalRegions; i++) {
-            if (regionAudited[i] >= 20) {
+            if (regionAudited[i] >= 12) {
                 const score = (regionMatched[i] / regionAudited[i]) * 100;
                 regionScores.push(score);
                 if (score < minRegionScore) minRegionScore = score;
@@ -394,40 +393,42 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImageRegional(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h})`;
+                    res = auditImage8x8Regional(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 8x8 Grid`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditImageRegional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
+                        res = auditImage8x8Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [8x8 Grid]`;
                         threshold = 80.0;
                     } else {
-                        res = auditImageRegional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        res = auditImage8x8Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [8x8 Grid]`;
                         threshold = 65.0;
                     }
                 }
 
-                // Render Heatmap 4x4
+                // Render Heatmap 8x8
                 heatmapBox.style.display = 'block';
                 heatmapGrid.innerHTML = '';
                 
-                // Ambang batas disparitas regional: Zona dinyatakan rusak jika skornya anjlok > 18% dari rata-rata global
-                const allowedDropLimit = 18.0;
+                // TOLERANSI DROP DINAMIS:
+                // Menghilangkan false positive pada kompresi ganda sambil menjaga sensitivitas editan
+                const adaptiveDropLimit = Math.max(15.0, (100.0 - res.matchRate) * 0.65);
                 let tamperedRegionsCount = 0;
 
                 for (let i = 0; i < REGION_GRID * REGION_GRID; i++) {
                     const score = res.regionScores[i];
                     const drop = res.matchRate - score;
-                    const isTampered = (drop > allowedDropLimit) && (score < 60.0);
+                    // Zona dinyatakan rusak jika skornya jatuh jauh di bawah rata-rata global DAN skor absolutnya rendah
+                    const isTampered = (drop > adaptiveDropLimit) && (score < 58.0);
 
                     const cell = document.createElement('div');
                     cell.className = isTampered ? 'heatmap-cell cell-tamper' : 'heatmap-cell cell-pass';
-                    cell.innerHTML = `<span>${score.toFixed(1)}%</span><span style="font-size: 9px; opacity: 0.8;">${drop > 0 ? `-${drop.toFixed(1)}%` : `+${Math.abs(drop).toFixed(1)}%`}</span>`;
+                    cell.innerHTML = `<span>${Math.round(score)}%</span><span style="font-size: 8px; opacity: 0.8;">${drop > 0 ? `-${Math.round(drop)}` : `+${Math.round(Math.abs(drop))}`}</span>`;
                     
                     if (isTampered) tamperedRegionsCount++;
                     heatmapGrid.appendChild(cell);
@@ -443,7 +444,7 @@
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 REGIONAL DISPARITY / TAMPER DETECTED! (${tamperedRegionsCount} quadrant(s) dropped severely | Worst: ${res.minRegionScore.toFixed(1)}%)`;
+                    resultTitle.innerHTML = `🔴 REGIONAL DISPARITY / TAMPER DETECTED! (${tamperedRegionsCount} zone(s) dropped severely | Worst: ${res.minRegionScore.toFixed(1)}%)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -457,7 +458,7 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Regional Stability:</b> Worst Region = ${res.minRegionScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
+                    <b>Regional Stability (64 Zones):</b> Worst Zone = ${res.minRegionScore.toFixed(1)}% (Adaptive drop threshold: ${adaptiveDropLimit.toFixed(1)}%)<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
