@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Weighted Cluster Verifier</title>
+    <title>SecurePixel Forensic Area Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Zero-Green Defect Verifier</h1>
+    <h1>SecurePixel Forensic Area Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,7 +50,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Authenticity & Zero-Green Zones</button>
+    <button onclick="verifyImage()">Audit Authenticity & Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -64,7 +64,7 @@
             <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
             <div class="legend-item"><div class="dot" style="background: #f59e0b;"></div> Degraded (50%)</div>
             <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Collapsed (0%)</div>
-            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Line/Zone</div>
+            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Zone</div>
         </div>
     </div>
 
@@ -307,19 +307,19 @@
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        // DETEKSI ANOMALI LOKAL TINGKAT LANJUT: ZERO GREEN & DEFECT DENSITY
-        let tamperedZones = [];
-        const WIN_RADIUS = 2; // Jendela 5x5 makroblok (sekitar 80x80 piksel)
+        // PEMINDAIAN ZONA ANOMALI LOKAL (Jendela 4x4 Makroblok = 64x64 piksel)
+        let rawSuspects = [];
+        const WIN_R = 2; // Radius 2 (jendela 5x5 makroblok)
 
-        for (let gy = WIN_RADIUS; gy < gridRows - WIN_RADIUS; gy += 1) {
-            for (let gx = WIN_RADIUS; gx < gridCols - WIN_RADIUS; gx += 1) {
+        for (let gy = WIN_R; gy < gridRows - WIN_R; gy += 1) {
+            for (let gx = WIN_R; gx < gridCols - WIN_R; gx += 1) {
                 let localAudited = 0;
-                let localGreen = 0;     // Status 2 (100% Intact)
-                let localYellow = 0;    // Status 1 (50% Degraded)
-                let localRed = 0;       // Status 0 (0% Collapsed)
+                let localGreen = 0;
+                let localYellow = 0;
+                let localRed = 0;
 
-                for (let wy = -WIN_RADIUS; wy <= WIN_RADIUS; wy++) {
-                    for (let wx = -WIN_RADIUS; wx <= WIN_RADIUS; wx++) {
+                for (let wy = -WIN_R; wy <= WIN_R; wy++) {
+                    for (let wx = -WIN_R; wx <= WIN_R; wx++) {
                         const status = blockStatus[(gy + wy) * gridCols + (gx + wx)];
                         if (status !== -1) {
                             localAudited++;
@@ -330,28 +330,41 @@
                     }
                 }
 
-                // Perlu minimal 6 blok aktif dalam jendela agar pengujian sah
                 if (localAudited >= 6) {
-                    // Skor bobot kerusakan murni: Merah berbobot 1.0, Kuning 0.5
-                    const weightedDamage = (localRed * 1.0 + localYellow * 0.5) / localAudited;
-
-                    // KRITERIA MUTLAK MANIPULASI / CORETAN:
-                    // 1. Zero-Green Extinction: Di lintasan coretan, blok hijau hampir musnah (localGreen <= 1 blok saja)
-                    // 2. Kepadatan Kerusakan: Lebih dari 75% energinya terdegradasi
-                    // 3. Ada minimal 2 blok merah murni (bukti pemusnahan frekuensi)
-                    const isTamperedZone = (localGreen <= 1) && (weightedDamage >= 0.75) && (localRed >= 2);
-
-                    if (isTamperedZone) {
-                        tamperedZones.push({
-                            x: (gx - WIN_RADIUS) * BLOCK_SIZE,
-                            y: (gy - WIN_RADIUS) * BLOCK_SIZE,
-                            w: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
-                            h: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
-                            green: localGreen,
-                            damage: (weightedDamage * 100).toFixed(0)
-                        });
+                    // Indikator Manipulasi Area:
+                    // 1. Kerusakan Masif: Merah >= 3 blok murni
+                    // 2. Tidak ada blok hijau yang mendominasi (Green <= 2)
+                    // 3. Rasio Kuning+Merah >= 75%
+                    const defectRatio = (localRed + localYellow) / localAudited;
+                    if (localRed >= 3 && localGreen <= 2 && defectRatio >= 0.75) {
+                        rawSuspects.push({ gx, gy });
                     }
                 }
+            }
+        }
+
+        // NOISE FILTERING:
+        // Jika cuma ada 1 jendela terisolasi tanpa teman di sekitarnya -> ini adalah NOISE KOMPRESI WA->FB!
+        // Manipulasi nyata (teks/stiker/coretan) pasti memicu cluster jendela yang saling bertetangga (minimal 2 jendela bersambung).
+        let confirmedZones = [];
+        for (let i = 0; i < rawSuspects.length; i++) {
+            let neighborCount = 0;
+            for (let j = 0; j < rawSuspects.length; j++) {
+                if (i === j) continue;
+                const dist = Math.max(Math.abs(rawSuspects[i].gx - rawSuspects[j].gx), Math.abs(rawSuspects[i].gy - rawSuspects[j].gy));
+                if (dist <= 2) {
+                    neighborCount++;
+                }
+            }
+
+            // Hanya terima jika ada tetangga anomali (membentuk area/garis manipulasi nyata)
+            if (neighborCount >= 1) {
+                confirmedZones.push({
+                    x: (rawSuspects[i].gx - WIN_R) * BLOCK_SIZE,
+                    y: (rawSuspects[i].gy - WIN_R) * BLOCK_SIZE,
+                    w: (WIN_R * 2 + 1) * BLOCK_SIZE,
+                    h: (WIN_R * 2 + 1) * BLOCK_SIZE
+                });
             }
         }
 
@@ -367,7 +380,7 @@
             gridCols,
             gridRows,
             blockStatus,
-            tamperedZones
+            tamperedZones: confirmedZones
         };
     }
 
@@ -465,7 +478,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Weighted Zero-Green Analysis`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Forensic Area Audit`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -493,7 +506,7 @@
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} zero-green damage zone(s) identified)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} contiguous manipulated area(s) detected)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -507,7 +520,7 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Integrity Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: High-confidence manipulation detected in ${res.tamperedZones.length} local zone(s).</span>` : '<span style="color:#34d399;">PASS: Sinyal hijau intak di seluruh area (tidak ada zona kepunahan hijau).</span>'}<br>
+                    <b>Spatial Forensic Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Contiguous tamper area confirmed (${res.tamperedZones.length} zones).</span>` : '<span style="color:#34d399;">PASS: Isolated noise only, no contiguous tampering detected.</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
