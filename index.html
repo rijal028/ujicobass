@@ -27,6 +27,12 @@
 
         .preview-box { text-align: center; margin-top: 14px; display: none; }
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
+
+        .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
+        .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
+        .bar-100 { background: #10b981; }
+        .bar-50 { background: #f59e0b; }
+        .bar-0 { background: #ef4444; }
     </style>
 </head>
 <body>
@@ -164,6 +170,12 @@
         let matchedBits = 0;
         let totalGapEnergy = 0.0;
 
+        // Penghitung Distribusi Skor Tiap Blok Makro (16x16)
+        let totalBlocksAudited = 0;
+        let count100 = 0; // 2 bit cocok
+        let count50 = 0;  // 1 bit cocok
+        let count0 = 0;   // 0 bit cocok (kedua bit rontok)
+
         const totalCells = GRID_SIZE * GRID_SIZE;
         const cellAudited = new Int32Array(totalCells);
         const cellMatched = new Int32Array(totalCells);
@@ -246,7 +258,7 @@
                     varianceSum += diff * diff;
                 }
                 const variance = varianceSum / totalPixelsPerBlock;
-                if (variance > 1800.0) continue; // Lewati area teks/kontras ekstrem
+                if (variance > 1800.0) continue; 
 
                 // Kurangi 128 untuk DCT
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
@@ -254,6 +266,8 @@
                 }
 
                 fastForwardDCT(blockLuma, dctCoefficients);
+
+                let blockMatches = 0;
 
                 // Pair 1: Smooth Diagonal (2,1) vs (1,2)
                 const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
@@ -263,6 +277,7 @@
                 if (bit1 === expectedBit1) {
                     matchedBits++;
                     cellMatched[cellIdx]++;
+                    blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff1);
                 totalAudited++;
@@ -276,10 +291,17 @@
                 if (bit2 === expectedBit2) {
                     matchedBits++;
                     cellMatched[cellIdx]++;
+                    blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff2);
                 totalAudited++;
                 cellAudited[cellIdx]++;
+
+                // Hitung Distribusi Blok Individu
+                totalBlocksAudited++;
+                if (blockMatches === 2) count100++;
+                else if (blockMatches === 1) count50++;
+                else count0++;
             }
         }
 
@@ -300,7 +322,19 @@
         }
 
         const maxDrop = matchRate - minCellScore;
-        return { matchRate, totalAudited, matchedBits, avgGap, cellScores, minCellScore, maxDrop };
+        return { 
+            matchRate, 
+            totalAudited, 
+            matchedBits, 
+            avgGap, 
+            cellScores, 
+            minCellScore, 
+            maxDrop,
+            totalBlocksAudited,
+            count100,
+            count50,
+            count0
+        };
     }
 
     function verifyImage() {
@@ -419,12 +453,28 @@
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
                 }
 
+                const p100 = ((res.count100 / res.totalBlocksAudited) * 100).toFixed(1);
+                const p50 = ((res.count50 / res.totalBlocksAudited) * 100).toFixed(1);
+                const p0 = ((res.count0 / res.totalBlocksAudited) * 100).toFixed(1);
+
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
                     <b>Spatial Consistency:</b> Worst block = ${res.minCellScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
-                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}
+                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
+
+                    <div class="distribution-box">
+                        <b>Macroblock Health Distribution (${res.totalBlocksAudited.toLocaleString()} blocks):</b>
+                        <div class="bar-container">
+                            <div class="bar-100" style="width: ${p100}%;" title="100% Match"></div>
+                            <div class="bar-50" style="width: ${p50}%;" title="50% Match"></div>
+                            <div class="bar-0" style="width: ${p0}%;" title="0% Match"></div>
+                        </div>
+                        <span style="color: #34d399;">■ 100% (Both bits): ${res.count100} (${p100}%)</span><br>
+                        <span style="color: #fbbf24;">■ 50%  (1 bit intact): ${res.count50} (${p50}%)</span><br>
+                        <span style="color: #f87171;">■ 0%   (Collapsed): ${res.count0} (${p0}%)</span>
+                    </div>
                 `;
             };
             img.src = e.target.result;
