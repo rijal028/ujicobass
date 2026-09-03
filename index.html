@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Forensic Area Verifier</title>
+    <title>SecurePixel Forensic Regional Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -22,11 +22,11 @@
         .preview-box { text-align: center; margin-top: 14px; display: none; }
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
 
-        .cluster-map-box { margin-top: 16px; text-align: center; display: none; }
-        #tamperCanvas { background: #020617; border: 1px solid #334155; border-radius: 6px; width: 100%; max-width: 480px; image-rendering: pixelated; margin-top: 6px; }
-        .legend { display: flex; justify-content: center; gap: 14px; font-size: 0.75rem; color: #94a3b8; margin-top: 6px; }
-        .legend-item { display: flex; align-items: center; gap: 4px; }
-        .dot { width: 10px; height: 10px; border-radius: 2px; }
+        .heatmap-box { margin-top: 16px; text-align: center; display: none; }
+        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(4, 72px); gap: 6px; padding: 10px; background: #020617; border-radius: 8px; border: 1px solid #334155; margin-top: 6px; }
+        .heatmap-cell { width: 72px; height: 48px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border-radius: 4px; }
+        .cell-pass { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; }
+        .cell-tamper { background: rgba(239, 68, 68, 0.35); border: 1px solid #ef4444; color: #fca5a5; }
 
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
         .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Forensic Area Verifier</h1>
+    <h1>SecurePixel Regional Forensic Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,22 +50,16 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Authenticity & Integrity</button>
+    <button onclick="verifyImage()">Audit Authenticity & Regional Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
         <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
-    <div id="clusterBox" class="cluster-map-box">
-        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map</span><br>
-        <canvas id="tamperCanvas"></canvas>
-        <div class="legend">
-            <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
-            <div class="legend-item"><div class="dot" style="background: #f59e0b;"></div> Degraded (50%)</div>
-            <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Collapsed (0%)</div>
-            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Zone</div>
-        </div>
+    <div id="heatmapBox" class="heatmap-box">
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Regional Disparity Map (4x4 Quadrants)</span><br>
+        <div id="heatmapGrid" class="heatmap-grid"></div>
     </div>
 
     <div id="resultBox" class="result-box">
@@ -79,6 +73,7 @@
 <script>
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 0.35; 
+    const REGION_GRID = 4; // 4x4 = 16 Zona Wilayah Terdistribusi
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -167,14 +162,13 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImage2DCluster(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    function auditImageRegional(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
-        const gridCols = Math.floor(targetWidth / BLOCK_SIZE);
-        const gridRows = Math.floor(targetHeight / BLOCK_SIZE);
-
-        const blockStatus = new Int8Array(gridCols * gridRows).fill(-1);
+        const totalRegions = REGION_GRID * REGION_GRID;
+        const regionAudited = new Int32Array(totalRegions);
+        const regionMatched = new Int32Array(totalRegions);
 
         let totalAudited = 0;
         let matchedBits = 0;
@@ -192,11 +186,12 @@
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
-        for (let gy = 0; gy < gridRows; gy++) {
-            const by = gy * BLOCK_SIZE;
-            for (let gx = 0; gx < gridCols; gx++) {
-                const bx = gx * BLOCK_SIZE;
-                const blockIdx = gy * gridCols + gx;
+        for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
+            const rY = Math.min(REGION_GRID - 1, Math.floor((by / targetHeight) * REGION_GRID));
+
+            for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
+                const rX = Math.min(REGION_GRID - 1, Math.floor((bx / targetWidth) * REGION_GRID));
+                const regionIdx = rY * REGION_GRID + rX;
 
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit1 = rng() > 0.5 ? 1 : 0;
@@ -278,10 +273,12 @@
                 const bit1 = diff1 > 0 ? 1 : 0;
                 if (bit1 === expectedBit1) {
                     matchedBits++;
+                    regionMatched[regionIdx]++;
                     blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff1);
                 totalAudited++;
+                regionAudited[regionIdx]++;
 
                 // Pair 2: Harmonic Diagonal (3,1) vs (1,3)
                 const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
@@ -290,14 +287,14 @@
                 const bit2 = diff2 > 0 ? 1 : 0;
                 if (bit2 === expectedBit2) {
                     matchedBits++;
+                    regionMatched[regionIdx]++;
                     blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff2);
                 totalAudited++;
+                regionAudited[regionIdx]++;
 
                 totalBlocksAudited++;
-                blockStatus[blockIdx] = blockMatches;
-
                 if (blockMatches === 2) count100++;
                 else if (blockMatches === 1) count50++;
                 else count0++;
@@ -307,66 +304,21 @@
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        // PEMINDAIAN ZONA ANOMALI LOKAL (Jendela 4x4 Makroblok = 64x64 piksel)
-        let rawSuspects = [];
-        const WIN_R = 2; // Radius 2 (jendela 5x5 makroblok)
+        // Hitung Skor Tiap Region 4x4
+        const regionScores = [];
+        let minRegionScore = 100.0;
 
-        for (let gy = WIN_R; gy < gridRows - WIN_R; gy += 1) {
-            for (let gx = WIN_R; gx < gridCols - WIN_R; gx += 1) {
-                let localAudited = 0;
-                let localGreen = 0;
-                let localYellow = 0;
-                let localRed = 0;
-
-                for (let wy = -WIN_R; wy <= WIN_R; wy++) {
-                    for (let wx = -WIN_R; wx <= WIN_R; wx++) {
-                        const status = blockStatus[(gy + wy) * gridCols + (gx + wx)];
-                        if (status !== -1) {
-                            localAudited++;
-                            if (status === 2) localGreen++;
-                            else if (status === 1) localYellow++;
-                            else if (status === 0) localRed++;
-                        }
-                    }
-                }
-
-                if (localAudited >= 6) {
-                    // Indikator Manipulasi Area:
-                    // 1. Kerusakan Masif: Merah >= 3 blok murni
-                    // 2. Tidak ada blok hijau yang mendominasi (Green <= 2)
-                    // 3. Rasio Kuning+Merah >= 75%
-                    const defectRatio = (localRed + localYellow) / localAudited;
-                    if (localRed >= 3 && localGreen <= 2 && defectRatio >= 0.75) {
-                        rawSuspects.push({ gx, gy });
-                    }
-                }
+        for (let i = 0; i < totalRegions; i++) {
+            if (regionAudited[i] >= 20) {
+                const score = (regionMatched[i] / regionAudited[i]) * 100;
+                regionScores.push(score);
+                if (score < minRegionScore) minRegionScore = score;
+            } else {
+                regionScores.push(matchRate);
             }
         }
 
-        // NOISE FILTERING:
-        // Jika cuma ada 1 jendela terisolasi tanpa teman di sekitarnya -> ini adalah NOISE KOMPRESI WA->FB!
-        // Manipulasi nyata (teks/stiker/coretan) pasti memicu cluster jendela yang saling bertetangga (minimal 2 jendela bersambung).
-        let confirmedZones = [];
-        for (let i = 0; i < rawSuspects.length; i++) {
-            let neighborCount = 0;
-            for (let j = 0; j < rawSuspects.length; j++) {
-                if (i === j) continue;
-                const dist = Math.max(Math.abs(rawSuspects[i].gx - rawSuspects[j].gx), Math.abs(rawSuspects[i].gy - rawSuspects[j].gy));
-                if (dist <= 2) {
-                    neighborCount++;
-                }
-            }
-
-            // Hanya terima jika ada tetangga anomali (membentuk area/garis manipulasi nyata)
-            if (neighborCount >= 1) {
-                confirmedZones.push({
-                    x: (rawSuspects[i].gx - WIN_R) * BLOCK_SIZE,
-                    y: (rawSuspects[i].gy - WIN_R) * BLOCK_SIZE,
-                    w: (WIN_R * 2 + 1) * BLOCK_SIZE,
-                    h: (WIN_R * 2 + 1) * BLOCK_SIZE
-                });
-            }
-        }
+        const maxDrop = matchRate - minRegionScore;
 
         return { 
             matchRate, 
@@ -377,47 +329,10 @@
             count100,
             count50,
             count0,
-            gridCols,
-            gridRows,
-            blockStatus,
-            tamperedZones: confirmedZones
+            regionScores,
+            minRegionScore,
+            maxDrop
         };
-    }
-
-    function renderTamperCanvas(res) {
-        const clusterBox = document.getElementById('clusterBox');
-        const canvas = document.getElementById('tamperCanvas');
-        clusterBox.style.display = 'block';
-
-        canvas.width = res.gridCols;
-        canvas.height = res.gridRows;
-        const ctx = canvas.getContext('2d');
-        const imgData = ctx.createImageData(res.gridCols, res.gridRows);
-
-        for (let y = 0; y < res.gridRows; y++) {
-            for (let x = 0; x < res.gridCols; x++) {
-                const idx = y * res.gridCols + x;
-                const p = idx * 4;
-                const status = res.blockStatus[idx];
-
-                if (status === 2) {
-                    imgData.data[p] = 16; imgData.data[p + 1] = 185; imgData.data[p + 2] = 129; imgData.data[p + 3] = 255;
-                } else if (status === 1) {
-                    imgData.data[p] = 245; imgData.data[p + 1] = 158; imgData.data[p + 2] = 11; imgData.data[p + 3] = 255;
-                } else if (status === 0) {
-                    imgData.data[p] = 239; imgData.data[p + 1] = 68; imgData.data[p + 2] = 68; imgData.data[p + 3] = 255;
-                } else {
-                    imgData.data[p] = 15; imgData.data[p + 1] = 23; imgData.data[p + 2] = 42; imgData.data[p + 3] = 255;
-                }
-            }
-        }
-        ctx.putImageData(imgData, 0, 0);
-
-        ctx.strokeStyle = '#f43f5e';
-        ctx.lineWidth = 1;
-        for (const zone of res.tamperedZones) {
-            ctx.strokeRect(zone.x / BLOCK_SIZE, zone.y / BLOCK_SIZE, zone.w / BLOCK_SIZE, zone.h / BLOCK_SIZE);
-        }
     }
 
     function verifyImage() {
@@ -428,6 +343,8 @@
         const resultMeta = document.getElementById('resultMeta');
         const previewContainer = document.getElementById('previewContainer');
         const cropPreview = document.getElementById('cropPreview');
+        const heatmapBox = document.getElementById('heatmapBox');
+        const heatmapGrid = document.getElementById('heatmapGrid');
 
         if (!rawKeyInput || !fileInput.files[0]) {
             alert('Please enter Master Key and select file!');
@@ -477,36 +394,56 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Forensic Area Audit`;
+                    res = auditImageRegional(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h})`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        res = auditImageRegional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
                         threshold = 80.0;
                     } else {
-                        res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        res = auditImageRegional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
                         threshold = 65.0;
                     }
                 }
 
-                renderTamperCanvas(res);
+                // Render Heatmap 4x4
+                heatmapBox.style.display = 'block';
+                heatmapGrid.innerHTML = '';
+                
+                // Ambang batas disparitas regional: Zona dinyatakan rusak jika skornya anjlok > 18% dari rata-rata global
+                const allowedDropLimit = 18.0;
+                let tamperedRegionsCount = 0;
+
+                for (let i = 0; i < REGION_GRID * REGION_GRID; i++) {
+                    const score = res.regionScores[i];
+                    const drop = res.matchRate - score;
+                    const isTampered = (drop > allowedDropLimit) && (score < 60.0);
+
+                    const cell = document.createElement('div');
+                    cell.className = isTampered ? 'heatmap-cell cell-tamper' : 'heatmap-cell cell-pass';
+                    cell.innerHTML = `<span>${score.toFixed(1)}%</span><span style="font-size: 9px; opacity: 0.8;">${drop > 0 ? `-${drop.toFixed(1)}%` : `+${Math.abs(drop).toFixed(1)}%`}</span>`;
+                    
+                    if (isTampered) tamperedRegionsCount++;
+                    heatmapGrid.appendChild(cell);
+                }
+
                 resultBox.style.display = 'block';
 
                 const isGloballyAuthentic = res.matchRate >= threshold;
-                const isLocalTamperDetected = res.tamperedZones.length > 0;
+                const isLocalTamperDetected = (tamperedRegionsCount > 0);
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} contiguous manipulated area(s) detected)`;
+                    resultTitle.innerHTML = `🔴 REGIONAL DISPARITY / TAMPER DETECTED! (${tamperedRegionsCount} quadrant(s) dropped severely | Worst: ${res.minRegionScore.toFixed(1)}%)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -520,7 +457,7 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Forensic Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Contiguous tamper area confirmed (${res.tamperedZones.length} zones).</span>` : '<span style="color:#34d399;">PASS: Isolated noise only, no contiguous tampering detected.</span>'}<br>
+                    <b>Regional Stability:</b> Worst Region = ${res.minRegionScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
