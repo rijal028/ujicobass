@@ -110,70 +110,6 @@
         return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
     }
 
-    // Deteksi cerdas batas screenshot (membuang letterbox hitam dan navigasi)
-    function detectScreenshotBounds(data, width, height) {
-        function isRowSolidBlack(y) {
-            for (let x = 16; x < width - 16; x += 16) {
-                const idx = (y * width + x) * 4;
-                if (data[idx] > 6 || data[idx + 1] > 6 || data[idx + 2] > 6) return false;
-            }
-            return true;
-        }
-
-        function isColSolidBlack(x, minY, maxY) {
-            for (let y = minY; y <= maxY; y += 16) {
-                const idx = (y * width + x) * 4;
-                if (data[idx] > 6 || data[idx + 1] > 6 || data[idx + 2] > 6) return false;
-            }
-            return true;
-        }
-
-        let top = 0;
-        let bottom = height - 1;
-
-        // Cari batas atas gambar (melewati area status bar jika ada)
-        for (let y = Math.floor(height * 0.02); y < Math.floor(height * 0.45); y++) {
-            if (!isRowSolidBlack(y)) {
-                top = y;
-                break;
-            }
-        }
-
-        // Cari batas bawah gambar
-        for (let y = Math.floor(height * 0.98); y > Math.floor(height * 0.55); y--) {
-            if (!isRowSolidBlack(y)) {
-                bottom = y;
-                break;
-            }
-        }
-
-        let left = 0;
-        let right = width - 1;
-
-        // Cari batas kiri & kanan
-        for (let x = 0; x < Math.floor(width * 0.35); x++) {
-            if (!isColSolidBlack(x, top, bottom)) {
-                left = x;
-                break;
-            }
-        }
-
-        for (let x = width - 1; x > Math.floor(width * 0.65); x--) {
-            if (!isColSolidBlack(x, top, bottom)) {
-                right = x;
-                break;
-            }
-        }
-
-        const cropW = (right - left) + 1;
-        const cropH = (bottom - top) + 1;
-
-        // Indikasi screenshot jika terdapat letterbox > 2.5% area layar
-        const isScreenshot = (cropW < width * 0.97) || (cropH < height * 0.96);
-
-        return { isScreenshot, x: left, y: top, w: cropW, h: cropH };
-    }
-
     function auditImage(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
@@ -308,9 +244,7 @@
                 canvas.height = nativeHeight;
                 ctx.drawImage(img, 0, 0, nativeWidth, nativeHeight);
 
-                let rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
-
-                // Extract locked dimension from key
+                // Ekstrak dimensi kanonik dari Master Key
                 const parts = rawKeyInput.split('_');
                 const dimParts = parts[parts.length - 1].split('x');
                 const canonicalWidth = parseInt(dimParts[0], 10);
@@ -321,16 +255,34 @@
                     return;
                 }
 
-                // 1. Periksa apakah file ini adalah screenshot ber-letterbox
-                const bounds = detectScreenshotBounds(rawData, nativeWidth, nativeHeight);
+                const screenRatio = nativeWidth / nativeHeight;
+                const canonicalRatio = canonicalWidth / canonicalHeight;
+
+                // Cek apakah ada disparitas rasio layar signifikan (khas screenshot galeri)
+                const isScreenshotAspectMismatch = Math.abs(screenRatio - canonicalRatio) > 0.05;
 
                 let res, mode, threshold;
-                let activeData = rawData;
-                let activeWidth = nativeWidth;
-                let activeHeight = nativeHeight;
 
-                if (bounds.isScreenshot) {
-                    // Re-sample area foto murni ke kanvas kanonik
+                if (isScreenshotAspectMismatch) {
+                    // Hitung secara matematis letak foto di dalam screenshot
+                    let photoDisplayW, photoDisplayH, offsetX, offsetY;
+
+                    if (screenRatio < canonicalRatio) {
+                        // Layar lebih sempit memanjang (Portrait HP standar, misal 1080x2460 vs 1:1 atau 4:3)
+                        // Foto menempel penuh pada lebar layar kiri-kanan
+                        photoDisplayW = nativeWidth;
+                        photoDisplayH = Math.round(nativeWidth / canonicalRatio);
+                        offsetX = 0;
+                        offsetY = Math.round((nativeHeight - photoDisplayH) / 2);
+                    } else {
+                        // Layar lebih lebar (misal screenshot landscape)
+                        photoDisplayH = nativeHeight;
+                        photoDisplayW = Math.round(nativeHeight * canonicalRatio);
+                        offsetX = Math.round((nativeWidth - photoDisplayW) / 2);
+                        offsetY = 0;
+                    }
+
+                    // Potong hanya area foto murni di tengah layar dan resample ke ukuran kanonik
                     const cropCanvas = document.createElement('canvas');
                     cropCanvas.width = canonicalWidth;
                     cropCanvas.height = canonicalHeight;
@@ -338,18 +290,17 @@
 
                     cropCtx.drawImage(
                         canvas,
-                        bounds.x, bounds.y, bounds.w, bounds.h,
+                        offsetX, offsetY, photoDisplayW, photoDisplayH,
                         0, 0, canonicalWidth, canonicalHeight
                     );
 
-                    activeData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    activeWidth = canonicalWidth;
-                    activeHeight = canonicalHeight;
+                    const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
 
-                    res = auditImage(activeData, activeWidth, activeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} from ${nativeWidth}x${nativeHeight}) &rarr; Canonical Re-aligned (${canonicalWidth}x${canonicalHeight})`;
-                    threshold = 64.0; // Toleransi interpolasi downsampling display HP
+                    res = auditImage(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Mathematical Auto-Center (${photoDisplayW}x${photoDisplayH} @ offset Y:${offsetY}px) &rarr; Canonical Locked Grid (${canonicalWidth}x${canonicalHeight})`;
+                    threshold = 62.0; // Toleransi interpolasi GPU display
                 } else {
+                    const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
