@@ -18,7 +18,7 @@
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
-        .preview-img { max-width: 100%; border-radius: 6px; margin-top: 12px; border: 1px solid #475569; display: none; }
+        .preview-img { max-width: 100%; border-radius: 6px; margin-top: 14px; border: 2px solid #38bdf8; display: none; }
     </style>
 </head>
 <body>
@@ -38,7 +38,10 @@
 
     <button onclick="verifyImage()">Verify Authenticity</button>
 
-    <img id="cropPreview" class="preview-img" alt="Auto-crop debug preview">
+    <div style="text-align: center;">
+        <p id="previewTitle" style="font-size: 0.8rem; color: #94a3b8; margin: 12px 0 0 0; display: none;">Cropped Area Preview (Photo Only):</p>
+        <img id="cropPreview" class="preview-img" alt="Cropped photo view">
+    </div>
 
     <div id="resultBox" class="result-box">
         <div id="resultTitle" style="font-weight: bold; font-size: 1.1rem;"></div>
@@ -110,71 +113,46 @@
         return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
     }
 
-    // Deteksi cerdas tepi gambar riil di tengah bilah hitam
-    function findActualPhotoBounds(data, width, height, targetAspect) {
-        // Cek apakah ada bilah hitam khas letterbox screenshot
-        // Periksa 3 sampel baris horizontal di area 25% dan 75% ketinggian layar
-        function isRowDarkLetterbox(y) {
-            let nonBlack = 0;
-            for (let x = 60; x < width - 60; x += 20) {
+    // Deteksi presisi batas atas & bawah foto berdasarkan lonjakan energi visual horizontal
+    function detectExactPhotoBounds(data, width, height, canonicalAspect) {
+        // Hitung tinggi foto eksak yang seharusnya ada di layar
+        const exactTargetHeight = Math.round(width / canonicalAspect); // e.g. 1080 / (2560/1920) = 810 px
+
+        // Ukur rata-rata luma baris sepanjang horizontal (mengabaikan 30px margin kiri-kanan)
+        const rowLumas = new Float64Array(height);
+        for (let y = 0; y < height; y++) {
+            let sum = 0.0;
+            let count = 0;
+            for (let x = 30; x < width - 30; x += 15) {
                 const idx = (y * width + x) * 4;
-                if (data[idx] > 18 || data[idx+1] > 18 || data[idx+2] > 18) {
-                    nonBlack++;
-                }
+                sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+                count++;
             }
-            return nonBlack < 4; // Lebih dari 90% piksel adalah hitam pekat
+            rowLumas[y] = count > 0 ? (sum / count) : 0;
         }
 
-        const midX = Math.floor(width / 2);
-        let topEdge = -1;
-        let bottomEdge = -1;
-
-        // Cari batas atas: lewati area status bar (0-200px), cari di mana piksel hitam berubah menjadi foto
-        for (let y = 180; y < Math.floor(height * 0.55); y++) {
-            const isDark = isRowDarkLetterbox(y);
-            const isNextDark = isRowDarkLetterbox(y + 2);
-            if (isDark && !isNextDark) {
-                topEdge = y + 2;
+        // Cari awal foto: Bilah hitam galeri berada di bawah status bar (y: 200 - 900)
+        // Di bilah hitam, luma < 8. Begitu masuk foto, luma melonjak drastis (> 20)
+        let topY = -1;
+        for (let y = 300; y < Math.floor(height * 0.6); y++) {
+            // Cek apakah 5 baris sebelumnya adalah bilah hitam dan 5 baris berikutnya adalah foto
+            if (rowLumas[y - 4] < 10 && rowLumas[y - 2] < 10 && rowLumas[y] >= 15 && rowLumas[y + 4] >= 15) {
+                topY = y;
                 break;
             }
         }
 
-        // Cari batas bawah: dari 90% layar naik ke atas
-        for (let y = Math.floor(height * 0.90); y > Math.floor(height * 0.45); y--) {
-            const isDark = isRowDarkLetterbox(y);
-            const isPrevDark = isRowDarkLetterbox(y - 2);
-            if (isDark && !isPrevDark) {
-                bottomEdge = y - 2;
-                break;
-            }
+        // Jika transisi tajam tidak ketemu (misal foto atasnya sangat gelap), gunakan kalkulasi tengah galeri
+        if (topY <= 0) {
+            topY = Math.round((height - exactTargetHeight) / 2);
         }
 
-        // Jika transisi terdeteksi valid
-        if (topEdge > 0 && bottomEdge > topEdge && (bottomEdge - topEdge) > 200) {
-            const cropH = bottomEdge - topEdge + 1;
-            return {
-                isScreenshot: true,
-                x: 0,
-                y: topEdge,
-                w: width,
-                h: cropH
-            };
-        }
-
-        // Fallback: Gunakan estimasi aspek rasio eksak jika auto edge tidak sempurna
-        const expectedH = Math.round(width / targetAspect);
-        if (expectedH < height * 0.85) {
-            const fallbackY = Math.round((height - expectedH) / 2);
-            return {
-                isScreenshot: true,
-                x: 0,
-                y: fallbackY,
-                w: width,
-                h: expectedH
-            };
-        }
-
-        return { isScreenshot: false, x: 0, y: 0, w: width, h: height };
+        return {
+            x: 0,
+            y: topY,
+            w: width,
+            h: exactTargetHeight
+        };
     }
 
     function auditImage(data, width, height, targetWidth, targetHeight, keyString) {
@@ -275,6 +253,7 @@
         const resultTitle = document.getElementById('resultTitle');
         const resultMeta = document.getElementById('resultMeta');
         const cropPreview = document.getElementById('cropPreview');
+        const previewTitle = document.getElementById('previewTitle');
 
         if (!rawKeyInput || !fileInput.files[0]) {
             alert('Please enter Master Key and select file!');
@@ -300,35 +279,39 @@
                 const canonicalHeight = parseInt(dimParts[1], 10);
                 const canonicalAspect = canonicalWidth / canonicalHeight;
 
-                const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
+                const screenAspect = nativeWidth / nativeHeight;
+                const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
 
-                // Cari batas foto asli di dalam screenshot
-                const bounds = findActualPhotoBounds(rawData, nativeWidth, nativeHeight, canonicalAspect);
+                const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
                 let res, mode, threshold;
 
-                if (bounds.isScreenshot) {
+                if (isScreenshot) {
+                    const bounds = detectExactPhotoBounds(rawData, nativeWidth, nativeHeight, canonicalAspect);
+
                     const cropCanvas = document.createElement('canvas');
                     cropCanvas.width = canonicalWidth;
                     cropCanvas.height = canonicalHeight;
                     const cropCtx = cropCanvas.getContext('2d');
 
-                    // Crop area foto murni di tengah dan rescale ke dimensi kanonik
+                    // Potong murni frame TV foto saja
                     cropCtx.drawImage(
                         canvas,
                         bounds.x, bounds.y, bounds.w, bounds.h,
                         0, 0, canonicalWidth, canonicalHeight
                     );
 
-                    // Tampilkan preview foto yang berhasil di-crop agar terlihat di layar
-                    cropPreview.src = cropCanvas.toDataURL();
+                    // Tampilkan pratinjau hasil crop di layar
+                    previewTitle.style.display = 'block';
+                    cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
                     cropPreview.style.display = 'block';
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} @ Y:${bounds.y}) &rarr; Canonical Re-aligned (${canonicalWidth}x${canonicalHeight})`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} @ Y:${bounds.y}) &rarr; Canonical (${canonicalWidth}x${canonicalHeight})`;
                     threshold = 60.0;
                 } else {
+                    previewTitle.style.display = 'none';
                     cropPreview.style.display = 'none';
                     res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput);
                     mode = `Direct Camera Image (${nativeWidth}x${nativeHeight})`;
