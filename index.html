@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Granular Cluster Verifier</title>
+    <title>SecurePixel Dense-Grid Cluster Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel 2D Cluster Tamper Verifier</h1>
+    <h1>SecurePixel Dense-Grid Cluster Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,7 +50,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Spatial Clusters & Integrity</button>
+    <button onclick="verifyImage()">Audit Dense Spatial Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -58,7 +58,7 @@
     </div>
 
     <div id="clusterBox" class="cluster-map-box">
-        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map</span><br>
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map (35% Density)</span><br>
         <canvas id="tamperCanvas"></canvas>
         <div class="legend">
             <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
@@ -78,7 +78,7 @@
 
 <script>
     const BLOCK_SIZE = 16; 
-    const CAMERA_SCATTER_RATIO = 0.15; 
+    const CAMERA_SCATTER_RATIO = 0.35; // DENSITAS 35% AGAR GARIS TIPIS PASTI TERTANGKAP
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -174,7 +174,6 @@
         const gridCols = Math.floor(targetWidth / BLOCK_SIZE);
         const gridRows = Math.floor(targetHeight / BLOCK_SIZE);
 
-        // Status Tiap Blok: -1 = Tidak disuntik/skip, 2 = 100% cocok, 1 = 50% cocok, 0 = 0% cocok
         const blockStatus = new Int8Array(gridCols * gridRows).fill(-1);
 
         let totalAudited = 0;
@@ -305,8 +304,8 @@
             }
         }
 
-        // DETEKSI KLUSTER ANOMALI (8-Connected Cluster Analysis)
-        // Menemukan blok gagal (0% atau 50%) yang saling menempel membentuk garis/gumpalan editan
+        // DETEKSI KLUSTER PRESISI (RADIUS 1 - TETANGGA LANGSUNG 8-ARAH)
+        // Menghindari false positive pada kompresi WA->FB karena titik noise acak tidak saling bersentuhan
         const visited = new Uint8Array(gridCols * gridRows);
         let maxClusterSize = 0;
         let tamperedClusters = [];
@@ -314,10 +313,8 @@
         for (let gy = 0; gy < gridRows; gy++) {
             for (let gx = 0; gx < gridCols; gx++) {
                 const idx = gy * gridCols + gx;
-                // Hanya periksa blok yang gagal (0 = 0% match, atau kombinasi berat)
                 if (visited[idx] || blockStatus[idx] !== 0) continue;
 
-                // BFS / Flood fill untuk menghitung ukuran kluster kerusakan
                 let queue = [[gx, gy]];
                 visited[idx] = 1;
                 let currentCluster = [];
@@ -326,9 +323,9 @@
                     const [cx, cy] = queue.shift();
                     currentCluster.push([cx, cy]);
 
-                    // Jelajahi tetangga 8-arah (radius 2 makroblok untuk menjembatani scatter)
-                    for (let dy = -2; dy <= 2; dy++) {
-                        for (let dx = -2; dx <= 2; dx++) {
+                    // Radius 1 murni (hanya tetangga yang benar-benar menempel langsung)
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
                             if (dx === 0 && dy === 0) continue;
                             const nx = cx + dx;
                             const ny = cy + dy;
@@ -343,15 +340,15 @@
                     }
                 }
 
-                // Hitung berapa banyak blok 0% murni di dalam kluster ini
+                // Hitung jumlah blok 0% (runtuh) yang saling bergandengan langsung
                 const collapsedCount = currentCluster.filter(([x, y]) => blockStatus[y * gridCols + x] === 0).length;
 
                 if (collapsedCount > maxClusterSize) {
                     maxClusterSize = collapsedCount;
                 }
 
-                // Ambang batas kluster: jika ada >= 4 blok runtuh yang saling bergandengan
-                if (collapsedCount >= 4) {
+                // Vonis manipulasi lokal: jika ada >= 5 blok runtuh yang bergandengan langsung
+                if (collapsedCount >= 5) {
                     tamperedClusters.push(currentCluster);
                 }
             }
@@ -394,23 +391,18 @@
                 const status = res.blockStatus[idx];
 
                 if (status === 2) {
-                    // 100% Cocok (Hijau)
                     imgData.data[p] = 16; imgData.data[p + 1] = 185; imgData.data[p + 2] = 129; imgData.data[p + 3] = 255;
                 } else if (status === 1) {
-                    // 50% Cocok (Oranye)
                     imgData.data[p] = 245; imgData.data[p + 1] = 158; imgData.data[p + 2] = 11; imgData.data[p + 3] = 255;
                 } else if (status === 0) {
-                    // 0% Runtuh (Merah Terang)
                     imgData.data[p] = 239; imgData.data[p + 1] = 68; imgData.data[p + 2] = 68; imgData.data[p + 3] = 255;
                 } else {
-                    // Tidak Disuntik / Rata (Abu-abu Gelap)
                     imgData.data[p] = 15; imgData.data[p + 1] = 23; imgData.data[p + 2] = 42; imgData.data[p + 3] = 255;
                 }
             }
         }
         ctx.putImageData(imgData, 0, 0);
 
-        // Beri sorotan kotak merah mencolok di kluster yang terindikasi dicoret/diedit
         ctx.strokeStyle = '#f43f5e';
         ctx.lineWidth = 1;
         for (const cluster of res.tamperedClusters) {
@@ -483,7 +475,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 2D Spatial Cluster`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 35% Dense Cluster Map`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -491,11 +483,11 @@
 
                     if (isExactNative) {
                         res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [35% Dense]`;
                         threshold = 80.0;
                     } else {
                         res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [35% Dense]`;
                         threshold = 65.0;
                     }
                 }
@@ -504,9 +496,6 @@
                 resultBox.style.display = 'block';
 
                 const isGloballyAuthentic = res.matchRate >= threshold;
-                // VONIS INTEGRITAS:
-                // Jika ditemukan kluster blok runtuh (collapsed blocks) >= 4 yang bergandengan,
-                // langsung jatuhkan vonis pemalsuan lokal!
                 const isLocalTamperDetected = res.tamperedClusters.length > 0;
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
@@ -514,7 +503,7 @@
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedClusters.length} suspicious cluster(s) found | Max cluster: ${res.maxClusterSize} collapsed blocks)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedClusters.length} connected damage cluster(s) | Max: ${res.maxClusterSize} contiguous blocks)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -527,7 +516,7 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
+                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (High Density)<br>
                     <b>Spatial Cluster Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Contiguous block destruction detected (${res.maxClusterSize} connected collapsed blocks).</span>` : '<span style="color:#34d399;">PASS: Isolated noise only, no contiguous clusters found.</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
