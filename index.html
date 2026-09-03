@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Defect Density Verifier</title>
+    <title>SecurePixel Weighted Cluster Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Defect Density Verifier</h1>
+    <h1>SecurePixel Zero-Green Defect Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,7 +50,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Authenticity & Defect Density</button>
+    <button onclick="verifyImage()">Audit Authenticity & Zero-Green Zones</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -58,13 +58,13 @@
     </div>
 
     <div id="clusterBox" class="cluster-map-box">
-        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map (35% Density)</span><br>
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map</span><br>
         <canvas id="tamperCanvas"></canvas>
         <div class="legend">
             <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
             <div class="legend-item"><div class="dot" style="background: #f59e0b;"></div> Degraded (50%)</div>
             <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Collapsed (0%)</div>
-            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Zone</div>
+            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Line/Zone</div>
         </div>
     </div>
 
@@ -307,53 +307,48 @@
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        // TINGKAT KERUSAKAN GLOBAL (Noise Background dari kompresi)
-        // Jika foto dikompresi WA->FB, baseline kerusakan globalnya wajar sekitar 35%-45%
-        const globalDegradationRate = totalBlocksAudited > 0 ? ((count50 + count0) / totalBlocksAudited) : 0;
-
-        // ANALISIS JENDELA LOKAL (Window 5x5 Makroblok)
-        // Mencari anomali kepadatan kerusakan: Di mana area lokal kerusakannya melonjak ekstrem dibanding rata-rata foto
+        // DETEKSI ANOMALI LOKAL TINGKAT LANJUT: ZERO GREEN & DEFECT DENSITY
         let tamperedZones = [];
-        let maxLocalDamageRatio = 0.0;
         const WIN_RADIUS = 2; // Jendela 5x5 makroblok (sekitar 80x80 piksel)
 
         for (let gy = WIN_RADIUS; gy < gridRows - WIN_RADIUS; gy += 1) {
             for (let gx = WIN_RADIUS; gx < gridCols - WIN_RADIUS; gx += 1) {
                 let localAudited = 0;
-                let localDegraded = 0; // Kuning (1) atau Merah (0)
+                let localGreen = 0;     // Status 2 (100% Intact)
+                let localYellow = 0;    // Status 1 (50% Degraded)
+                let localRed = 0;       // Status 0 (0% Collapsed)
 
                 for (let wy = -WIN_RADIUS; wy <= WIN_RADIUS; wy++) {
                     for (let wx = -WIN_RADIUS; wx <= WIN_RADIUS; wx++) {
                         const status = blockStatus[(gy + wy) * gridCols + (gx + wx)];
                         if (status !== -1) {
                             localAudited++;
-                            if (status === 0 || status === 1) {
-                                localDegraded++;
-                            }
+                            if (status === 2) localGreen++;
+                            else if (status === 1) localYellow++;
+                            else if (status === 0) localRed++;
                         }
                     }
                 }
 
-                // Butuh minimal 6 blok aktif dalam jendela 5x5 untuk uji statistik valid
+                // Perlu minimal 6 blok aktif dalam jendela agar pengujian sah
                 if (localAudited >= 6) {
-                    const localDamageRatio = localDegraded / localAudited;
-                    if (localDamageRatio > maxLocalDamageRatio) {
-                        maxLocalDamageRatio = localDamageRatio;
-                    }
+                    // Skor bobot kerusakan murni: Merah berbobot 1.0, Kuning 0.5
+                    const weightedDamage = (localRed * 1.0 + localYellow * 0.5) / localAudited;
 
-                    // Ambang batas cerdas adaptif:
-                    // Kerusakan lokal harus sangat pekat (>= 80%) DAN melompat minimal 35% di atas noise global!
-                    // Ini membuat kompresi WA->FB (noise rata 42%) kebal dari false alarm,
-                    // tapi coretan kuas (kerusakan lokal 85%-100%) langsung tertangkap basah!
-                    const isAnomalous = (localDamageRatio >= 0.80) && ((localDamageRatio - globalDegradationRate) >= 0.35);
+                    // KRITERIA MUTLAK MANIPULASI / CORETAN:
+                    // 1. Zero-Green Extinction: Di lintasan coretan, blok hijau hampir musnah (localGreen <= 1 blok saja)
+                    // 2. Kepadatan Kerusakan: Lebih dari 75% energinya terdegradasi
+                    // 3. Ada minimal 2 blok merah murni (bukti pemusnahan frekuensi)
+                    const isTamperedZone = (localGreen <= 1) && (weightedDamage >= 0.75) && (localRed >= 2);
 
-                    if (isAnomalous) {
+                    if (isTamperedZone) {
                         tamperedZones.push({
                             x: (gx - WIN_RADIUS) * BLOCK_SIZE,
                             y: (gy - WIN_RADIUS) * BLOCK_SIZE,
                             w: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
                             h: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
-                            ratio: (localDamageRatio * 100).toFixed(1)
+                            green: localGreen,
+                            damage: (weightedDamage * 100).toFixed(0)
                         });
                     }
                 }
@@ -372,9 +367,7 @@
             gridCols,
             gridRows,
             blockStatus,
-            tamperedZones,
-            maxLocalDamageRatio: (maxLocalDamageRatio * 100).toFixed(1),
-            globalDegradationRate: (globalDegradationRate * 100).toFixed(1)
+            tamperedZones
         };
     }
 
@@ -407,7 +400,6 @@
         }
         ctx.putImageData(imgData, 0, 0);
 
-        // Sorot zona manipulasi jika ditemukan
         ctx.strokeStyle = '#f43f5e';
         ctx.lineWidth = 1;
         for (const zone of res.tamperedZones) {
@@ -473,7 +465,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Density Analysis`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Weighted Zero-Green Analysis`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -501,7 +493,7 @@
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} dense defect zone(s) found | Peak Damage: ${res.maxLocalDamageRatio}%)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} zero-green damage zone(s) identified)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -515,7 +507,7 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Defect Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Concentrated local damage (${res.maxLocalDamageRatio}% vs ${res.globalDegradationRate}% global noise).</span>` : '<span style="color:#34d399;">PASS: Damage distributed uniformly, no concentrated tampering.</span>'}<br>
+                    <b>Spatial Integrity Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: High-confidence manipulation detected in ${res.tamperedZones.length} local zone(s).</span>` : '<span style="color:#34d399;">PASS: Sinyal hijau intak di seluruh area (tidak ada zona kepunahan hijau).</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
