@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Green-Extinction Forensic Verifier</title>
+    <title>SecurePixel Dual-Layer Adjacency Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -39,7 +39,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Green-Extinction Forensic Verifier</h1>
+    <h1>SecurePixel Dual-Layer Adjacency Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -170,7 +170,6 @@
         const totalRegions = REGION_GRID * REGION_GRID;
         const regionAudited = new Int32Array(totalRegions);
         const regionMatched = new Int32Array(totalRegions);
-        const regionGreenCount = new Int32Array(totalRegions); // Jumlah blok 100% utuh per zona
 
         let totalAudited = 0;
         let matchedBits = 0;
@@ -297,14 +296,9 @@
                 regionAudited[regionIdx]++;
 
                 totalBlocksAudited++;
-                if (blockMatches === 2) {
-                    count100++;
-                    regionGreenCount[regionIdx]++;
-                } else if (blockMatches === 1) {
-                    count50++;
-                } else {
-                    count0++;
-                }
+                if (blockMatches === 2) count100++;
+                else if (blockMatches === 1) count50++;
+                else count0++;
             }
         }
 
@@ -336,7 +330,6 @@
             count50,
             count0,
             regionScores,
-            regionGreenCount,
             minRegionScore,
             maxDrop
         };
@@ -402,7 +395,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage16x16Regional(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Green Extinction`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Adjacency`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -410,11 +403,11 @@
 
                     if (isExactNative) {
                         res = auditImage16x16Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [Green Extinction]`;
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [16x16 Adjacency]`;
                         threshold = 80.0;
                     } else {
                         res = auditImage16x16Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [Green Extinction]`;
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [16x16 Adjacency]`;
                         threshold = 65.0;
                     }
                 }
@@ -423,8 +416,9 @@
                 heatmapBox.style.display = 'block';
                 heatmapGrid.innerHTML = '';
                 
-                // Ambang Disparitas Relatif: Zona anjlok >= 16% dibanding rata-rata foto
-                const dynamicDropThreshold = res.matchRate >= 94.0 ? 14.0 : 16.0;
+                // Ambang Disparitas Anjlok Lokal:
+                // Menandai zona yang skornya turun drastis dibanding rata-rata global gambar
+                const dynamicDropThreshold = res.matchRate >= 94.0 ? 14.0 : Math.max(16.0, (100.0 - res.matchRate) * 0.70);
                 
                 const droppedMatrix = Array.from({length: REGION_GRID}, () => new Uint8Array(REGION_GRID));
                 const dropValues = Array.from({length: REGION_GRID}, () => new Float32Array(REGION_GRID));
@@ -436,42 +430,40 @@
                         const drop = res.matchRate - score;
                         dropValues[rY][rX] = drop;
 
-                        const greenBlocks = res.regionGreenCount[idx];
-
-                        // DUA KRITERIA MUTLAK MANIPULASI:
-                        // 1. Skor anjlok di bawah rata-rata global (drop >= dynamicDropThreshold)
-                        // 2. GREEN EXTINCTION: Di area editan/coretan, blok 100% hijau musnah (<= 2 blok).
-                        // Di FB (skor 50 & 63%), blok hijaunya masih banyak (>= 3-8 blok), jadi lolos!
-                        if (drop >= dynamicDropThreshold && greenBlocks <= 2) {
+                        if (drop >= dynamicDropThreshold) {
                             droppedMatrix[rY][rX] = 1;
                         }
                     }
                 }
 
-                // KETETANGGAAN ORTOGONAL (Atas, Bawah, Kiri, Kanan)
+                // ANALISIS KETETANGGAAN SPASIAL (Spatial Adjacency Filter)
+                // Membedakan titik acak terisolasi (noise kompresi) vs pola menempel (edits/strokes)
                 const isContiguousCluster = Array.from({length: REGION_GRID}, () => new Uint8Array(REGION_GRID));
                 let contiguousTamperCount = 0;
                 let isolatedNoiseCount = 0;
 
-                const orthogonalOffsets = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-
                 for (let rY = 0; rY < REGION_GRID; rY++) {
                     for (let rX = 0; rX < REGION_GRID; rX++) {
                         if (droppedMatrix[rY][rX] === 1) {
-                            let hasOrthogonalNeighbor = false;
-
-                            for (const [dy, dx] of orthogonalOffsets) {
-                                const ny = rY + dy;
-                                const nx = rX + dx;
-                                if (ny >= 0 && ny < REGION_GRID && nx >= 0 && nx < REGION_GRID) {
-                                    if (droppedMatrix[ny][nx] === 1) {
-                                        hasOrthogonalNeighbor = true;
-                                        break;
+                            let hasNeighbor = false;
+                            
+                            // Periksa 8 tetangga sekitar (radius 1)
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    const ny = rY + dy;
+                                    const nx = rX + dx;
+                                    if (ny >= 0 && ny < REGION_GRID && nx >= 0 && nx < REGION_GRID) {
+                                        if (droppedMatrix[ny][nx] === 1) {
+                                            hasNeighbor = true;
+                                            break;
+                                        }
                                     }
                                 }
+                                if (hasNeighbor) break;
                             }
 
-                            if (hasOrthogonalNeighbor) {
+                            if (hasNeighbor) {
                                 isContiguousCluster[rY][rX] = 1;
                                 contiguousTamperCount++;
                             } else {
@@ -487,19 +479,18 @@
                         const idx = rY * REGION_GRID + rX;
                         const score = res.regionScores[idx];
                         const drop = dropValues[rY][rX];
-                        const green = res.regionGreenCount[idx];
 
                         const cell = document.createElement('div');
                         
                         if (isContiguousCluster[rY][rX] === 1) {
-                            cell.className = 'heatmap-cell cell-tamper'; // Merah: Manipulasi Terbukti
-                        } else if (drop >= dynamicDropThreshold) {
-                            cell.className = 'heatmap-cell cell-isolated'; // Kuning: Kompresi FB / Noise Ditoleransi
+                            cell.className = 'heatmap-cell cell-tamper'; // Menempel berdampingan -> Merah
+                        } else if (droppedMatrix[rY][rX] === 1) {
+                            cell.className = 'heatmap-cell cell-isolated'; // Terpencil sendirian -> Kuning Noise
                         } else {
-                            cell.className = 'heatmap-cell cell-pass'; // Hijau: Sehat
+                            cell.className = 'heatmap-cell cell-pass'; // Normal -> Hijau
                         }
 
-                        cell.title = `Zone (${rX+1},${rY+1}): ${Math.round(score)}% (Drop: -${drop.toFixed(1)}%, Green: ${green} blocks)`;
+                        cell.title = `Zone (${rX+1},${rY+1}): ${Math.round(score)}% (Drop: -${drop.toFixed(1)}%)`;
                         cell.innerText = `${Math.round(score)}%`;
                         heatmapGrid.appendChild(cell);
                     }
@@ -508,7 +499,8 @@
                 resultBox.style.display = 'block';
                 const isGloballyAuthentic = res.matchRate >= threshold;
                 
-                // Manipulasi valid jika ada kluster ortogonal yang mengalami Green Extinction
+                // VONIS INTEGRITAS:
+                // Manipulasi dinyatakan ADA jika ditemukan minimal 2 zona anomali yang saling menempel (bergandengan)
                 const isLocalTamperDetected = (contiguousTamperCount >= 2);
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
@@ -516,7 +508,7 @@
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${contiguousTamperCount} contiguous green-extinct zones confirmed)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${contiguousTamperCount} contiguous damaged zones confirmed)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -530,8 +522,8 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Audit:</b> ${contiguousTamperCount} connected tamper zone(s) | ${isolatedNoiseCount} noise zone(s) tolerated<br>
-                    <b>Forensic Rule:</b> Disparity Drop &ge; ${dynamicDropThreshold.toFixed(1)}% AND Local Green Blocks &le; 2<br>
+                    <b>Adjacency Spatial Audit:</b> ${contiguousTamperCount} connected anomaly zone(s) | ${isolatedNoiseCount} isolated noise zone(s) tolerated<br>
+                    <b>Integrity Evaluation:</b> ${isLocalTamperDetected ? '<span style="color:#f87171; font-weight:bold;">CONFIRMED TAMPER PATTERN (Connected damage cluster found)</span>' : '<span style="color:#34d399;">PASS (All drops are isolated random noise)</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
