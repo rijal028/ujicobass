@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Dense-Grid Cluster Verifier</title>
+    <title>SecurePixel Defect Density Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Dense-Grid Cluster Verifier</h1>
+    <h1>SecurePixel Defect Density Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,7 +50,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Dense Spatial Integrity</button>
+    <button onclick="verifyImage()">Audit Authenticity & Defect Density</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -64,7 +64,7 @@
             <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
             <div class="legend-item"><div class="dot" style="background: #f59e0b;"></div> Degraded (50%)</div>
             <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Collapsed (0%)</div>
-            <div class="legend-item"><div class="dot" style="background: #e11d48; border: 1px solid #fff;"></div> Tamper Cluster</div>
+            <div class="legend-item"><div class="dot" style="background: #f43f5e; border: 1px solid #fff;"></div> Tamper Zone</div>
         </div>
     </div>
 
@@ -78,7 +78,7 @@
 
 <script>
     const BLOCK_SIZE = 16; 
-    const CAMERA_SCATTER_RATIO = 0.35; // DENSITAS 35% AGAR GARIS TIPIS PASTI TERTANGKAP
+    const CAMERA_SCATTER_RATIO = 0.35; 
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -304,58 +304,61 @@
             }
         }
 
-        // DETEKSI KLUSTER PRESISI (RADIUS 1 - TETANGGA LANGSUNG 8-ARAH)
-        // Menghindari false positive pada kompresi WA->FB karena titik noise acak tidak saling bersentuhan
-        const visited = new Uint8Array(gridCols * gridRows);
-        let maxClusterSize = 0;
-        let tamperedClusters = [];
+        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
+        const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        for (let gy = 0; gy < gridRows; gy++) {
-            for (let gx = 0; gx < gridCols; gx++) {
-                const idx = gy * gridCols + gx;
-                if (visited[idx] || blockStatus[idx] !== 0) continue;
+        // TINGKAT KERUSAKAN GLOBAL (Noise Background dari kompresi)
+        // Jika foto dikompresi WA->FB, baseline kerusakan globalnya wajar sekitar 35%-45%
+        const globalDegradationRate = totalBlocksAudited > 0 ? ((count50 + count0) / totalBlocksAudited) : 0;
 
-                let queue = [[gx, gy]];
-                visited[idx] = 1;
-                let currentCluster = [];
+        // ANALISIS JENDELA LOKAL (Window 5x5 Makroblok)
+        // Mencari anomali kepadatan kerusakan: Di mana area lokal kerusakannya melonjak ekstrem dibanding rata-rata foto
+        let tamperedZones = [];
+        let maxLocalDamageRatio = 0.0;
+        const WIN_RADIUS = 2; // Jendela 5x5 makroblok (sekitar 80x80 piksel)
 
-                while (queue.length > 0) {
-                    const [cx, cy] = queue.shift();
-                    currentCluster.push([cx, cy]);
+        for (let gy = WIN_RADIUS; gy < gridRows - WIN_RADIUS; gy += 1) {
+            for (let gx = WIN_RADIUS; gx < gridCols - WIN_RADIUS; gx += 1) {
+                let localAudited = 0;
+                let localDegraded = 0; // Kuning (1) atau Merah (0)
 
-                    // Radius 1 murni (hanya tetangga yang benar-benar menempel langsung)
-                    for (let dy = -1; dy <= 1; dy++) {
-                        for (let dx = -1; dx <= 1; dx++) {
-                            if (dx === 0 && dy === 0) continue;
-                            const nx = cx + dx;
-                            const ny = cy + dy;
-                            if (nx >= 0 && nx < gridCols && ny >= 0 && ny < gridRows) {
-                                const nIdx = ny * gridCols + nx;
-                                if (!visited[nIdx] && (blockStatus[nIdx] === 0 || blockStatus[nIdx] === 1)) {
-                                    visited[nIdx] = 1;
-                                    queue.push([nx, ny]);
-                                }
+                for (let wy = -WIN_RADIUS; wy <= WIN_RADIUS; wy++) {
+                    for (let wx = -WIN_RADIUS; wx <= WIN_RADIUS; wx++) {
+                        const status = blockStatus[(gy + wy) * gridCols + (gx + wx)];
+                        if (status !== -1) {
+                            localAudited++;
+                            if (status === 0 || status === 1) {
+                                localDegraded++;
                             }
                         }
                     }
                 }
 
-                // Hitung jumlah blok 0% (runtuh) yang saling bergandengan langsung
-                const collapsedCount = currentCluster.filter(([x, y]) => blockStatus[y * gridCols + x] === 0).length;
+                // Butuh minimal 6 blok aktif dalam jendela 5x5 untuk uji statistik valid
+                if (localAudited >= 6) {
+                    const localDamageRatio = localDegraded / localAudited;
+                    if (localDamageRatio > maxLocalDamageRatio) {
+                        maxLocalDamageRatio = localDamageRatio;
+                    }
 
-                if (collapsedCount > maxClusterSize) {
-                    maxClusterSize = collapsedCount;
-                }
+                    // Ambang batas cerdas adaptif:
+                    // Kerusakan lokal harus sangat pekat (>= 80%) DAN melompat minimal 35% di atas noise global!
+                    // Ini membuat kompresi WA->FB (noise rata 42%) kebal dari false alarm,
+                    // tapi coretan kuas (kerusakan lokal 85%-100%) langsung tertangkap basah!
+                    const isAnomalous = (localDamageRatio >= 0.80) && ((localDamageRatio - globalDegradationRate) >= 0.35);
 
-                // Vonis manipulasi lokal: jika ada >= 5 blok runtuh yang bergandengan langsung
-                if (collapsedCount >= 5) {
-                    tamperedClusters.push(currentCluster);
+                    if (isAnomalous) {
+                        tamperedZones.push({
+                            x: (gx - WIN_RADIUS) * BLOCK_SIZE,
+                            y: (gy - WIN_RADIUS) * BLOCK_SIZE,
+                            w: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
+                            h: (WIN_RADIUS * 2 + 1) * BLOCK_SIZE,
+                            ratio: (localDamageRatio * 100).toFixed(1)
+                        });
+                    }
                 }
             }
         }
-
-        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
-        const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
         return { 
             matchRate, 
@@ -369,8 +372,9 @@
             gridCols,
             gridRows,
             blockStatus,
-            maxClusterSize,
-            tamperedClusters
+            tamperedZones,
+            maxLocalDamageRatio: (maxLocalDamageRatio * 100).toFixed(1),
+            globalDegradationRate: (globalDegradationRate * 100).toFixed(1)
         };
     }
 
@@ -403,17 +407,11 @@
         }
         ctx.putImageData(imgData, 0, 0);
 
+        // Sorot zona manipulasi jika ditemukan
         ctx.strokeStyle = '#f43f5e';
         ctx.lineWidth = 1;
-        for (const cluster of res.tamperedClusters) {
-            let minX = res.gridCols, maxX = 0, minY = res.gridRows, maxY = 0;
-            for (const [cx, cy] of cluster) {
-                if (cx < minX) minX = cx;
-                if (cx > maxX) maxX = cx;
-                if (cy < minY) minY = cy;
-                if (cy > maxY) maxY = cy;
-            }
-            ctx.strokeRect(minX - 1, minY - 1, (maxX - minX) + 3, (maxY - minY) + 3);
+        for (const zone of res.tamperedZones) {
+            ctx.strokeRect(zone.x / BLOCK_SIZE, zone.y / BLOCK_SIZE, zone.w / BLOCK_SIZE, zone.h / BLOCK_SIZE);
         }
     }
 
@@ -475,7 +473,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 35% Dense Cluster Map`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Density Analysis`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -483,11 +481,11 @@
 
                     if (isExactNative) {
                         res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [35% Dense]`;
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
                         threshold = 80.0;
                     } else {
                         res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [35% Dense]`;
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
                         threshold = 65.0;
                     }
                 }
@@ -496,14 +494,14 @@
                 resultBox.style.display = 'block';
 
                 const isGloballyAuthentic = res.matchRate >= threshold;
-                const isLocalTamperDetected = res.tamperedClusters.length > 0;
+                const isLocalTamperDetected = res.tamperedZones.length > 0;
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedClusters.length} connected damage cluster(s) | Max: ${res.maxClusterSize} contiguous blocks)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedZones.length} dense defect zone(s) found | Peak Damage: ${res.maxLocalDamageRatio}%)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -516,8 +514,8 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (High Density)<br>
-                    <b>Spatial Cluster Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Contiguous block destruction detected (${res.maxClusterSize} connected collapsed blocks).</span>` : '<span style="color:#34d399;">PASS: Isolated noise only, no contiguous clusters found.</span>'}<br>
+                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
+                    <b>Spatial Defect Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Concentrated local damage (${res.maxLocalDamageRatio}% vs ${res.globalDegradationRate}% global noise).</span>` : '<span style="color:#34d399;">PASS: Damage distributed uniformly, no concentrated tampering.</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
