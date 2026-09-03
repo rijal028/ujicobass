@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Exact Scatter Verifier</title>
+    <title>SecurePixel Disparity Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -20,10 +20,10 @@
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
         
         .grid-container { display: none; margin-top: 14px; text-align: center; }
-        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(4, 52px); gap: 4px; padding: 8px; background: #0b0f19; border-radius: 6px; border: 1px solid #334155; }
-        .heatmap-cell { width: 52px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border-radius: 4px; color: #fff; }
+        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(6, 44px); gap: 3px; padding: 8px; background: #0b0f19; border-radius: 6px; border: 1px solid #334155; }
+        .heatmap-cell { width: 44px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; border-radius: 3px; color: #fff; }
         .cell-pass { background: rgba(16, 185, 129, 0.35); border: 1px solid #10b981; color: #34d399; }
-        .cell-fail { background: rgba(239, 68, 68, 0.45); border: 1px solid #ef4444; color: #fca5a5; }
+        .cell-fail { background: rgba(239, 68, 68, 0.55); border: 1px solid #ef4444; color: #fca5a5; }
 
         .preview-box { text-align: center; margin-top: 14px; display: none; }
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
@@ -32,7 +32,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Exact Scatter Verifier</h1>
+    <h1>SecurePixel Authenticity & Tamper Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -44,7 +44,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit All Embedded Scatters</button>
+    <button onclick="verifyImage()">Audit Authenticity & Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -52,7 +52,7 @@
     </div>
 
     <div id="gridContainer" class="grid-container">
-        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Scatter Heatmap (4x4 Quadrants):</span><br>
+        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Disparity Heatmap (6x6 Grid):</span><br>
         <div id="heatmapGrid" class="heatmap-grid" style="margin-top: 6px;"></div>
     </div>
 
@@ -66,11 +66,9 @@
 
 <script>
     const BLOCK_SIZE = 16;
-    
-    // SINKRONISASI 1:1 DENGAN CAMERA KOTLIN (SCATTER_RATIO = 0.08)
     const CAMERA_SCATTER_RATIO = 0.08; 
+    const GRID_SIZE = 6; // Grid 6x6 (36 sub-zona pengawas)
 
-    // Precomputed 16x16 DCT Matrices
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const invSqrtN = 1.0 / Math.sqrt(BLOCK_SIZE);
@@ -161,8 +159,7 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    // AUDIT EKSKLUSIF: HANYA MEMERIKSA TITIK-TITIK YANG DISEGEL KAMERA SECARA UTUH
-    function auditEmbeddedScattersOnly(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    function auditImageDisparity(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
@@ -170,8 +167,9 @@
         let matchedBits = 0;
         let totalGapEnergy = 0.0;
 
-        const quadrantAudited = new Int32Array(16);
-        const quadrantMatched = new Int32Array(16);
+        const totalCells = GRID_SIZE * GRID_SIZE;
+        const cellAudited = new Int32Array(totalCells);
+        const cellMatched = new Int32Array(totalCells);
 
         const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
         const blockLuma = new Float64Array(totalPixelsPerBlock);
@@ -181,18 +179,16 @@
         const scaleY = height / targetHeight;
 
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
-            const qY = Math.min(3, Math.floor((by / targetHeight) * 4));
+            const cY = Math.min(GRID_SIZE - 1, Math.floor((by / targetHeight) * GRID_SIZE));
 
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
-                const qX = Math.min(3, Math.floor((bx / targetWidth) * 4));
-                const quadIdx = qY * 4 + qX;
+                const cX = Math.min(GRID_SIZE - 1, Math.floor((bx / targetWidth) * GRID_SIZE));
+                const cellIdx = cY * GRID_SIZE + cX;
 
-                // Sinkron persis dengan iterasi RNG kamera
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit1 = rng() > 0.5 ? 1 : 0;
                 const expectedBit2 = rng() > 0.5 ? 1 : 0;
 
-                // JIKA BLOK INI TIDAK DISUNTIK OLEH KAMERA, LEWATI
                 if (!isSelected) continue;
 
                 let blockSumLuma = 0.0;
@@ -243,54 +239,60 @@
                     }
                 }
 
-                // Sesuai filter saturasi di kamera (avgLuma < 25.0 || avgLuma > 230.0)
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
                 if (avgLuma < 25.0 || avgLuma > 230.0) continue;
 
                 fastForwardDCT16(blockLuma, dctCoefficients);
 
-                // Pair 1: Smooth Diagonal (2,1) vs (1,2)
+                // Pair 1: (2,1) vs (1,2)
                 const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                 const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                 const diff1 = c1 - c2;
                 const bit1 = diff1 > 0 ? 1 : 0;
                 if (bit1 === expectedBit1) {
                     matchedBits++;
-                    quadrantMatched[quadIdx]++;
+                    cellMatched[cellIdx]++;
                 }
                 totalGapEnergy += Math.abs(diff1);
                 totalAudited++;
-                quadrantAudited[quadIdx]++;
+                cellAudited[cellIdx]++;
 
-                // Pair 2: Harmonic Diagonal (3,1) vs (1,3)
+                // Pair 2: (3,1) vs (1,3)
                 const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
                 const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
                 const diff2 = c3 - c4;
                 const bit2 = diff2 > 0 ? 1 : 0;
                 if (bit2 === expectedBit2) {
                     matchedBits++;
-                    quadrantMatched[quadIdx]++;
+                    cellMatched[cellIdx]++;
                 }
                 totalGapEnergy += Math.abs(diff2);
                 totalAudited++;
-                quadrantAudited[quadIdx]++;
+                cellAudited[cellIdx]++;
             }
         }
 
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        const quadrantScores = [];
-        let minQuadScore = 100.0;
-        for (let i = 0; i < 16; i++) {
-            const qRate = quadrantAudited[i] > 0 ? (quadrantMatched[i] / quadrantAudited[i]) * 100 : 50.0;
-            quadrantScores.push(qRate);
-            if (quadrantAudited[i] >= 10 && qRate < minQuadScore) {
-                minQuadScore = qRate;
+        const cellScores = [];
+        let minCellScore = 100.0;
+        let validCellsCount = 0;
+
+        for (let i = 0; i < totalCells; i++) {
+            if (cellAudited[i] >= 8) {
+                const score = (cellMatched[i] / cellAudited[i]) * 100;
+                cellScores.push(score);
+                if (score < minCellScore) minCellScore = score;
+                validCellsCount++;
+            } else {
+                cellScores.push(matchRate); // Netral untuk area yang minim tekstur
             }
         }
 
-        return { matchRate, totalAudited, matchedBits, avgGap, quadrantScores, minQuadScore };
+        const maxDrop = matchRate - minCellScore;
+
+        return { matchRate, totalAudited, matchedBits, avgGap, cellScores, minCellScore, maxDrop };
     }
 
     function verifyImage() {
@@ -352,68 +354,73 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditEmbeddedScattersOnly(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Exact Scatter Synchronized`;
+                    res = auditImageDisparity(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Spatial Disparity Audit`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditEmbeddedScattersOnly(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) &rarr; 100% Scatter Audit`;
-                        threshold = 82.0;
+                        res = auditImageDisparity(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) &rarr; Spatial Disparity Audit`;
+                        threshold = 80.0;
                     } else {
-                        res = auditEmbeddedScattersOnly(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        res = auditImageDisparity(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight}) &rarr; Spatial Disparity Audit`;
                         threshold = 68.0;
                     }
                 }
 
-                // Render Heatmap 4x4
+                // Render Heatmap 6x6
                 gridContainer.style.display = 'block';
                 heatmapGrid.innerHTML = '';
-                const quadrantThreshold = threshold - 6.0;
-                let hasTamperedQuadrant = false;
+                
+                // Aturan: Zona dinyatakan fail jika nilainya anjlok lebih dari 16% dibanding rata-rata global
+                const allowedDropLimit = 16.0;
+                let hasTamperedZone = false;
 
-                for (let i = 0; i < 16; i++) {
-                    const score = res.quadrantScores[i];
+                for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
+                    const score = res.cellScores[i];
                     const cell = document.createElement('div');
                     cell.className = 'heatmap-cell';
                     cell.innerText = `${Math.round(score)}%`;
 
-                    if (score >= quadrantThreshold) {
-                        cell.classList.add('cell-pass');
-                    } else {
+                    const localDrop = res.matchRate - score;
+                    if (localDrop > allowedDropLimit || score < 56.0) {
                         cell.classList.add('cell-fail');
-                        hasTamperedQuadrant = true;
+                        hasTamperedZone = true;
+                    } else {
+                        cell.classList.add('cell-pass');
                     }
                     heatmapGrid.appendChild(cell);
                 }
 
                 resultBox.style.display = 'block';
 
+                // KEPUTUSAN FORENSIK:
+                // 1. Rata-rata global harus memenuhi threshold keaslian
+                // 2. TIDAK BOLEH ADA anomali zona spesifik yang jatuh sendirian (Local Tampering)
                 const isGloballyAuthentic = res.matchRate >= threshold;
-                // Anomali terdeteksi bila salah satu kuadran jatuh di bawah 56.0% (mendekati probabilitas acak)
-                const isTampered = hasTamperedQuadrant && (res.minQuadScore < 56.0);
+                const isLocalTamperDetected = hasTamperedZone && (res.maxDrop > allowedDropLimit);
 
-                if (isGloballyAuthentic && !isTampered) {
+                if (isGloballyAuthentic && !isLocalTamperDetected) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
-                } else if (isTampered) {
+                } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED (Worst Area: ${res.minQuadScore.toFixed(1)}%)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (Worst Block: ${res.minCellScore.toFixed(1)}% | Drop: -${res.maxDrop.toFixed(1)}%)`;
                 } else {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 FORGED / TAMPERED (${res.matchRate.toFixed(2)}%)`;
+                    resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
                 }
 
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Verified Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (100% of camera scatter)<br>
-                    <b>Lowest Quadrant Score:</b> ${res.minQuadScore.toFixed(1)}% (Threshold: &ge; ${quadrantThreshold.toFixed(1)}%)<br>
-                    <b>Global Threshold:</b> &ge; ${threshold.toFixed(2)}%
+                    <b>Global Match Rate:</b> ${res.matchRate.toFixed(2)}% (Threshold: &ge; ${threshold.toFixed(1)}%)<br>
+                    <b>Spatial Consistency:</b> Worst block = ${res.minCellScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
+                    <b>Integrity Status:</b> ${isLocalTamperDetected ? 'FAILED: Localized pixel modification detected' : 'PASSED: Uniform spatial energy'}
                 `;
             };
             img.src = e.target.result;
