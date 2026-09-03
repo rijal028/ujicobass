@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SecurePixel Bound-Key Verifier</title>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 600px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h1 { font-size: 1.4rem; margin-top: 0; color: #38bdf8; text-align: center; }
+        .input-group { margin-bottom: 16px; }
+        label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; }
+        button { width: 100%; padding: 12px; background-color: #0284c7; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #0369a1; }
+        .result-box { margin-top: 20px; padding: 16px; border-radius: 8px; display: none; }
+        .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
+        .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
+        .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h1>SecurePixel Authenticity Verifier</h1>
+    
+    <div class="input-group">
+        <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
+        <input type="text" id="keyInput" placeholder="Example: 1725166800000_2944x2944">
+    </div>
+
+    <div class="input-group">
+        <label for="imageInput">Select Image / Screenshot File:</label>
+        <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
+    </div>
+
+    <button onclick="verifyImage()">Verify Authenticity</button>
+
+    <div id="resultBox" class="result-box">
+        <div id="resultTitle" style="font-weight: bold; font-size: 1.1rem;"></div>
+        <div id="resultMeta" class="meta-info"></div>
+    </div>
+</div>
+
+<canvas id="canvas" style="display: none;"></canvas>
+
+<script>
+    const BLOCK_SIZE = 16;
+    const SCATTER_RATIO = 0.08;
+
+    // Precomputed 16x16 DCT Matrices
+    const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
+    const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
+    const invSqrtN = 1.0 / Math.sqrt(BLOCK_SIZE);
+    const sqrt2DivN = Math.sqrt(2.0 / BLOCK_SIZE);
+
+    for (let j = 0; j < BLOCK_SIZE; j++) {
+        C[0][j] = invSqrtN;
+        CT[j][0] = invSqrtN;
+    }
+    for (let i = 1; i < BLOCK_SIZE; i++) {
+        for (let j = 0; j < BLOCK_SIZE; j++) {
+            const val = sqrt2DivN * Math.cos(((2 * j + 1) * i * Math.PI) / (2.0 * BLOCK_SIZE));
+            C[i][j] = val;
+            CT[j][i] = val;
+        }
+    }
+
+    function createPRNG(seed) {
+        let state = Number(BigInt(seed) % 2147483647n);
+        if (state <= 0) state += 2147483646;
+        return function() {
+            state = Number((BigInt(state) * 16807n) % 2147483647n);
+            return (state - 1) / 2147483646;
+        };
+    }
+
+    function deriveSubSeed(keyString, salt) {
+        const combined = `${keyString}_${salt}`;
+        let hash = 0;
+        for (let i = 0; i < combined.length; i++) {
+            hash = (31 * hash + combined.charCodeAt(i)) | 0;
+        }
+        return Math.abs(hash);
+    }
+
+    function fastForwardDCT16(inputBlock, outputCoefficients) {
+        const temp = new Float64Array(BLOCK_SIZE * BLOCK_SIZE);
+        for (let i = 0; i < BLOCK_SIZE; i++) {
+            for (let j = 0; j < BLOCK_SIZE; j++) {
+                let sum = 0.0;
+                for (let k = 0; k < BLOCK_SIZE; k++) sum += C[i][k] * inputBlock[k * BLOCK_SIZE + j];
+                temp[i * BLOCK_SIZE + j] = sum;
+            }
+        }
+        for (let i = 0; i < BLOCK_SIZE; i++) {
+            for (let j = 0; j < BLOCK_SIZE; j++) {
+                let sum = 0.0;
+                for (let k = 0; k < BLOCK_SIZE; k++) sum += temp[i * BLOCK_SIZE + k] * CT[k][j];
+                outputCoefficients[i * BLOCK_SIZE + j] = sum;
+            }
+        }
+    }
+
+    function getLumaAt(data, width, height, x, y) {
+        const px = Math.max(0, Math.min(width - 1, Math.floor(x)));
+        const py = Math.max(0, Math.min(height - 1, Math.floor(y)));
+        const idx = (py * width + px) * 4;
+        return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    }
+
+    // Deteksi cerdas batas screenshot (membuang letterbox hitam dan navigasi)
+    function detectScreenshotBounds(data, width, height) {
+        function isRowSolidBlack(y) {
+            for (let x = 16; x < width - 16; x += 16) {
+                const idx = (y * width + x) * 4;
+                if (data[idx] > 6 || data[idx + 1] > 6 || data[idx + 2] > 6) return false;
+            }
+            return true;
+        }
+
+        function isColSolidBlack(x, minY, maxY) {
+            for (let y = minY; y <= maxY; y += 16) {
+                const idx = (y * width + x) * 4;
+                if (data[idx] > 6 || data[idx + 1] > 6 || data[idx + 2] > 6) return false;
+            }
+            return true;
+        }
+
+        let top = 0;
+        let bottom = height - 1;
+
+        // Cari batas atas gambar (melewati area status bar jika ada)
+        for (let y = Math.floor(height * 0.02); y < Math.floor(height * 0.45); y++) {
+            if (!isRowSolidBlack(y)) {
+                top = y;
+                break;
+            }
+        }
+
+        // Cari batas bawah gambar
+        for (let y = Math.floor(height * 0.98); y > Math.floor(height * 0.55); y--) {
+            if (!isRowSolidBlack(y)) {
+                bottom = y;
+                break;
+            }
+        }
+
+        let left = 0;
+        let right = width - 1;
+
+        // Cari batas kiri & kanan
+        for (let x = 0; x < Math.floor(width * 0.35); x++) {
+            if (!isColSolidBlack(x, top, bottom)) {
+                left = x;
+                break;
+            }
+        }
+
+        for (let x = width - 1; x > Math.floor(width * 0.65); x--) {
+            if (!isColSolidBlack(x, top, bottom)) {
+                right = x;
+                break;
+            }
+        }
+
+        const cropW = (right - left) + 1;
+        const cropH = (bottom - top) + 1;
+
+        // Indikasi screenshot jika terdapat letterbox > 2.5% area layar
+        const isScreenshot = (cropW < width * 0.97) || (cropH < height * 0.96);
+
+        return { isScreenshot, x: left, y: top, w: cropW, h: cropH };
+    }
+
+    function auditImage(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+        const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
+        const rng = createPRNG(subSeed);
+
+        let totalAudited = 0;
+        let matchedBits = 0;
+        let totalGapEnergy = 0.0;
+
+        const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
+        const blockLuma = new Float64Array(totalPixelsPerBlock);
+        const dctCoefficients = new Float64Array(totalPixelsPerBlock);
+
+        const scaleX = width / targetWidth;
+        const scaleY = height / targetHeight;
+
+        for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
+            for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
+                const isSelected = rng() <= SCATTER_RATIO;
+
+                let blockSumLuma = 0.0;
+
+                if (!isDownscaled) {
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const rowIdx = ((by + y) * width + bx) * 4;
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const p = rowIdx + (x * 4);
+                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                        }
+                    }
+                } else {
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const startY = (by + y) * scaleY;
+                        const endY = (by + y + 1) * scaleY;
+
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const startX = (bx + x) * scaleX;
+                            const endX = (bx + x + 1) * scaleX;
+
+                            let subLumaSum = 0.0;
+                            let subSamples = 0;
+
+                            const minSY = Math.max(0, Math.floor(startY));
+                            const maxSY = Math.min(height - 1, Math.floor(endY));
+                            const minSX = Math.max(0, Math.floor(startX));
+                            const maxSX = Math.min(width - 1, Math.floor(endX));
+
+                            for (let sy = minSY; sy <= maxSY; sy++) {
+                                const rowOffset = sy * width * 4;
+                                for (let sx = minSX; sx <= maxSX; sx++) {
+                                    const p = rowOffset + (sx * 4);
+                                    subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                                    subSamples++;
+                                }
+                            }
+
+                            const luma = subSamples > 0 
+                                ? (subLumaSum / subSamples) 
+                                : getLumaAt(data, width, height, (startX + endX) / 2.0, (startY + endY) / 2.0);
+
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                        }
+                    }
+                }
+
+                const expectedBit1 = rng() > 0.5 ? 1 : 0;
+                const expectedBit2 = rng() > 0.5 ? 1 : 0;
+
+                if (!isSelected) continue;
+
+                const avgLuma = blockSumLuma / totalPixelsPerBlock;
+                if (avgLuma < 25.0 || avgLuma > 230.0) continue;
+
+                fastForwardDCT16(blockLuma, dctCoefficients);
+
+                // Pair 1: (2,1) vs (1,2)
+                const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
+                const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
+                const diff1 = c1 - c2;
+                const bit1 = diff1 > 0 ? 1 : 0;
+                if (bit1 === expectedBit1) matchedBits++;
+                totalGapEnergy += Math.abs(diff1);
+                totalAudited++;
+
+                // Pair 2: (3,1) vs (1,3)
+                const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
+                const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
+                const diff2 = c3 - c4;
+                const bit2 = diff2 > 0 ? 1 : 0;
+                if (bit2 === expectedBit2) matchedBits++;
+                totalGapEnergy += Math.abs(diff2);
+                totalAudited++;
+            }
+        }
+
+        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
+        const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
+
+        return { matchRate, totalAudited, matchedBits, avgGap };
+    }
+
+    function verifyImage() {
+        const rawKeyInput = document.getElementById('keyInput').value.trim();
+        const fileInput = document.getElementById('imageInput');
+        const resultBox = document.getElementById('resultBox');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultMeta = document.getElementById('resultMeta');
+
+        if (!rawKeyInput || !fileInput.files[0]) {
+            alert('Please enter the Master Key and select an image file!');
+            return;
+        }
+
+        if (!rawKeyInput.includes('_') || !rawKeyInput.includes('x')) {
+            alert('Invalid Key Format! The Master Key MUST include dimensions (e.g. 1725166800000_2944x2944).');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.onload = function() {
+                const nativeWidth = img.naturalWidth;
+                const nativeHeight = img.naturalHeight;
+
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+                canvas.width = nativeWidth;
+                canvas.height = nativeHeight;
+                ctx.drawImage(img, 0, 0, nativeWidth, nativeHeight);
+
+                let rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
+
+                // Extract locked dimension from key
+                const parts = rawKeyInput.split('_');
+                const dimParts = parts[parts.length - 1].split('x');
+                const canonicalWidth = parseInt(dimParts[0], 10);
+                const canonicalHeight = parseInt(dimParts[1], 10);
+
+                if (isNaN(canonicalWidth) || isNaN(canonicalHeight) || canonicalWidth <= 0 || canonicalHeight <= 0) {
+                    alert('Failed to parse dimensions from Master Key!');
+                    return;
+                }
+
+                // 1. Periksa apakah file ini adalah screenshot ber-letterbox
+                const bounds = detectScreenshotBounds(rawData, nativeWidth, nativeHeight);
+
+                let res, mode, threshold;
+                let activeData = rawData;
+                let activeWidth = nativeWidth;
+                let activeHeight = nativeHeight;
+
+                if (bounds.isScreenshot) {
+                    // Re-sample area foto murni ke kanvas kanonik
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = canonicalWidth;
+                    cropCanvas.height = canonicalHeight;
+                    const cropCtx = cropCanvas.getContext('2d');
+
+                    cropCtx.drawImage(
+                        canvas,
+                        bounds.x, bounds.y, bounds.w, bounds.h,
+                        0, 0, canonicalWidth, canonicalHeight
+                    );
+
+                    activeData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
+                    activeWidth = canonicalWidth;
+                    activeHeight = canonicalHeight;
+
+                    res = auditImage(activeData, activeWidth, activeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} from ${nativeWidth}x${nativeHeight}) &rarr; Canonical Re-aligned (${canonicalWidth}x${canonicalHeight})`;
+                    threshold = 64.0; // Toleransi interpolasi downsampling display HP
+                } else {
+                    const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
+
+                    if (isExactNative) {
+                        res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Original Native Capture (${nativeWidth}x${nativeHeight}) [${canonicalWidth/16}x${canonicalHeight/16} Macroblocks]`;
+                        threshold = 85.0;
+                    } else {
+                        res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; Locked Grid ${canonicalWidth}x${canonicalHeight})`;
+                        threshold = 68.0;
+                    }
+                }
+
+                resultBox.style.display = 'block';
+
+                if (res.matchRate >= threshold) {
+                    resultBox.className = "result-box valid";
+                    resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
+                } else {
+                    resultBox.className = "result-box invalid";
+                    resultTitle.innerHTML = `🔴 TAMPERED / FORGED (${res.matchRate.toFixed(2)}%)`;
+                }
+
+                resultMeta.innerHTML = `
+                    <b>Bound Master Key:</b> ${rawKeyInput}<br>
+                    <b>Detection Mode:</b> ${mode}<br>
+                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)} (Target Nominal: 24.0)<br>
+                    <b>Matched Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
+                    <b>Authenticity Threshold:</b> &ge; ${threshold.toFixed(2)}% (Random Baseline = 50.00%)
+                `;
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(fileInput.files[0]);
+    }
+</script>
+
+</body>
+</html>
