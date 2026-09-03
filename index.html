@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 16x16 Quorum Verifier</title>
+    <title>SecurePixel Dual-Layer Adjacency Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -26,7 +26,7 @@
         .heatmap-grid { display: inline-grid; grid-template-columns: repeat(16, 38px); gap: 2px; padding: 6px; background: #020617; border-radius: 8px; border: 1px solid #334155; margin-top: 6px; max-width: 100%; overflow-x: auto; }
         .heatmap-cell { width: 38px; height: 26px; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: bold; border-radius: 2px; cursor: default; }
         .cell-pass { background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; }
-        .cell-noise { background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; }
+        .cell-isolated { background: rgba(245, 158, 11, 0.25); border: 1px solid rgba(245, 158, 11, 0.5); color: #fbbf24; }
         .cell-tamper { background: rgba(239, 68, 68, 0.6); border: 1px solid #ef4444; color: #fff; font-weight: 900; }
 
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
@@ -39,7 +39,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel 16x16 Quorum Forensic Verifier</h1>
+    <h1>SecurePixel Dual-Layer Adjacency Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -51,7 +51,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit 256 Micro-Zones Integrity</button>
+    <button onclick="verifyImage()">Audit Micro-Adjacency & Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -59,7 +59,7 @@
     </div>
 
     <div id="heatmapBox" class="heatmap-box">
-        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Micro-Disparity Map (16x16 = 256 Zones)</span><br>
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Micro-Disparity Map (16x16 Grid)</span><br>
         <div id="heatmapGrid" class="heatmap-grid"></div>
     </div>
 
@@ -395,7 +395,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage16x16Regional(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Quorum`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Adjacency`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -403,61 +403,112 @@
 
                     if (isExactNative) {
                         res = auditImage16x16Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [16x16 Quorum]`;
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) [16x16 Adjacency]`;
                         threshold = 80.0;
                     } else {
                         res = auditImage16x16Regional(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [16x16 Quorum]`;
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight}) [16x16 Adjacency]`;
                         threshold = 65.0;
                     }
                 }
 
-                // Render Heatmap 16x16
+                // Render Heatmap 16x16 (256 Zona)
                 heatmapBox.style.display = 'block';
                 heatmapGrid.innerHTML = '';
                 
-                // Disparitas threshold per zona
-                const dynamicDropThreshold = res.matchRate >= 94.0 ? 15.0 : Math.max(16.0, (100.0 - res.matchRate) * 0.70);
-                let droppedZonesCount = 0;
+                // Ambang Disparitas Anjlok Lokal:
+                // Menandai zona yang skornya turun drastis dibanding rata-rata global gambar
+                const dynamicDropThreshold = res.matchRate >= 94.0 ? 14.0 : Math.max(16.0, (100.0 - res.matchRate) * 0.70);
+                
+                const droppedMatrix = Array.from({length: REGION_GRID}, () => new Uint8Array(REGION_GRID));
+                const dropValues = Array.from({length: REGION_GRID}, () => new Float32Array(REGION_GRID));
 
-                for (let i = 0; i < REGION_GRID * REGION_GRID; i++) {
-                    const score = res.regionScores[i];
-                    const drop = res.matchRate - score;
-                    const isDropped = (drop >= dynamicDropThreshold);
+                for (let rY = 0; rY < REGION_GRID; rY++) {
+                    for (let rX = 0; rX < REGION_GRID; rX++) {
+                        const idx = rY * REGION_GRID + rX;
+                        const score = res.regionScores[idx];
+                        const drop = res.matchRate - score;
+                        dropValues[rY][rX] = drop;
 
-                    if (isDropped) droppedZonesCount++;
-
-                    const cell = document.createElement('div');
-                    cell.className = isDropped ? 'heatmap-cell cell-noise' : 'heatmap-cell cell-pass';
-                    cell.title = `Zone ${i+1}: ${Math.round(score)}% (Drop: -${drop.toFixed(1)}%)`;
-                    cell.innerText = `${Math.round(score)}%`;
-                    
-                    heatmapGrid.appendChild(cell);
+                        if (drop >= dynamicDropThreshold) {
+                            droppedMatrix[rY][rX] = 1;
+                        }
+                    }
                 }
 
-                // AMBANG KUORUM FORENSIK:
-                // Kompresi (WA, FB, SS, WA->FB) maksimal menghasilkan 1-5 zona sporadis.
-                // Manipulasi / Coretan nyata menghasilkan >= 6 zona.
-                const QUORUM_LIMIT = 5;
-                const isLocalTamperDetected = (droppedZonesCount > QUORUM_LIMIT);
+                // ANALISIS KETETANGGAAN SPASIAL (Spatial Adjacency Filter)
+                // Membedakan titik acak terisolasi (noise kompresi) vs pola menempel (edits/strokes)
+                const isContiguousCluster = Array.from({length: REGION_GRID}, () => new Uint8Array(REGION_GRID));
+                let contiguousTamperCount = 0;
+                let isolatedNoiseCount = 0;
 
-                // Update visual: jika benar-benar manipulasi (>= 6 zona), ubah warna zona drop menjadi MERAH pekat
-                if (isLocalTamperDetected) {
-                    const cells = heatmapGrid.getElementsByClassName('cell-noise');
-                    while(cells.length > 0) {
-                        cells[0].className = 'heatmap-cell cell-tamper';
+                for (let rY = 0; rY < REGION_GRID; rY++) {
+                    for (let rX = 0; rX < REGION_GRID; rX++) {
+                        if (droppedMatrix[rY][rX] === 1) {
+                            let hasNeighbor = false;
+                            
+                            // Periksa 8 tetangga sekitar (radius 1)
+                            for (let dy = -1; dy <= 1; dy++) {
+                                for (let dx = -1; dx <= 1; dx++) {
+                                    if (dx === 0 && dy === 0) continue;
+                                    const ny = rY + dy;
+                                    const nx = rX + dx;
+                                    if (ny >= 0 && ny < REGION_GRID && nx >= 0 && nx < REGION_GRID) {
+                                        if (droppedMatrix[ny][nx] === 1) {
+                                            hasNeighbor = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (hasNeighbor) break;
+                            }
+
+                            if (hasNeighbor) {
+                                isContiguousCluster[rY][rX] = 1;
+                                contiguousTamperCount++;
+                            } else {
+                                isolatedNoiseCount++;
+                            }
+                        }
+                    }
+                }
+
+                // Render Sel Heatmap
+                for (let rY = 0; rY < REGION_GRID; rY++) {
+                    for (let rX = 0; rX < REGION_GRID; rX++) {
+                        const idx = rY * REGION_GRID + rX;
+                        const score = res.regionScores[idx];
+                        const drop = dropValues[rY][rX];
+
+                        const cell = document.createElement('div');
+                        
+                        if (isContiguousCluster[rY][rX] === 1) {
+                            cell.className = 'heatmap-cell cell-tamper'; // Menempel berdampingan -> Merah
+                        } else if (droppedMatrix[rY][rX] === 1) {
+                            cell.className = 'heatmap-cell cell-isolated'; // Terpencil sendirian -> Kuning Noise
+                        } else {
+                            cell.className = 'heatmap-cell cell-pass'; // Normal -> Hijau
+                        }
+
+                        cell.title = `Zone (${rX+1},${rY+1}): ${Math.round(score)}% (Drop: -${drop.toFixed(1)}%)`;
+                        cell.innerText = `${Math.round(score)}%`;
+                        heatmapGrid.appendChild(cell);
                     }
                 }
 
                 resultBox.style.display = 'block';
                 const isGloballyAuthentic = res.matchRate >= threshold;
+                
+                // VONIS INTEGRITAS:
+                // Manipulasi dinyatakan ADA jika ditemukan minimal 2 zona anomali yang saling menempel (bergandengan)
+                const isLocalTamperDetected = (contiguousTamperCount >= 2);
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${droppedZonesCount} zones corrupted | Quorum exceeded: > ${QUORUM_LIMIT})`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${contiguousTamperCount} contiguous damaged zones confirmed)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -471,8 +522,8 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Quorum Status:</b> ${droppedZonesCount} of 256 zones degraded (Quorum tolerance: &le; ${QUORUM_LIMIT} zones)<br>
-                    <b>Integrity State:</b> ${isLocalTamperDetected ? '<span style="color:#f87171; font-weight:bold;">CONFIRMED TAMPERING (Damage forms continuous cluster)</span>' : '<span style="color:#34d399;">PASS (Minor compression noise tolerated)</span>'}<br>
+                    <b>Adjacency Spatial Audit:</b> ${contiguousTamperCount} connected anomaly zone(s) | ${isolatedNoiseCount} isolated noise zone(s) tolerated<br>
+                    <b>Integrity Evaluation:</b> ${isLocalTamperDetected ? '<span style="color:#f87171; font-weight:bold;">CONFIRMED TAMPER PATTERN (Connected damage cluster found)</span>' : '<span style="color:#34d399;">PASS (All drops are isolated random noise)</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
