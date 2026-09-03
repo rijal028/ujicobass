@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Bound-Key Verifier</title>
+    <title>SecurePixel Exact Scatter Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 600px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 640px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.4rem; margin-top: 0; color: #38bdf8; text-align: center; }
         .input-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
@@ -18,13 +18,21 @@
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
-        .preview-img { max-width: 100%; border-radius: 6px; margin-top: 14px; border: 2px solid #38bdf8; display: none; }
+        
+        .grid-container { display: none; margin-top: 14px; text-align: center; }
+        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(4, 52px); gap: 4px; padding: 8px; background: #0b0f19; border-radius: 6px; border: 1px solid #334155; }
+        .heatmap-cell { width: 52px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; border-radius: 4px; color: #fff; }
+        .cell-pass { background: rgba(16, 185, 129, 0.35); border: 1px solid #10b981; color: #34d399; }
+        .cell-fail { background: rgba(239, 68, 68, 0.45); border: 1px solid #ef4444; color: #fca5a5; }
+
+        .preview-box { text-align: center; margin-top: 14px; display: none; }
+        .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h1>SecurePixel Authenticity Verifier</h1>
+    <h1>SecurePixel Exact Scatter Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -32,15 +40,20 @@
     </div>
 
     <div class="input-group">
-        <label for="imageInput">Select Image / Screenshot File:</label>
+        <label for="imageInput">Select Image File (Native, WhatsApp/FB, or Screenshot):</label>
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Verify Authenticity</button>
+    <button onclick="verifyImage()">Audit All Embedded Scatters</button>
 
-    <div style="text-align: center;">
-        <p id="previewTitle" style="font-size: 0.8rem; color: #94a3b8; margin: 12px 0 0 0; display: none;">Cropped Area Preview (Photo Only):</p>
-        <img id="cropPreview" class="preview-img" alt="Cropped photo view">
+    <div id="previewContainer" class="preview-box">
+        <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
+        <img id="cropPreview" class="preview-img" alt="Cropped preview">
+    </div>
+
+    <div id="gridContainer" class="grid-container">
+        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Scatter Heatmap (4x4 Quadrants):</span><br>
+        <div id="heatmapGrid" class="heatmap-grid" style="margin-top: 6px;"></div>
     </div>
 
     <div id="resultBox" class="result-box">
@@ -53,8 +66,11 @@
 
 <script>
     const BLOCK_SIZE = 16;
-    const SCATTER_RATIO = 0.08;
+    
+    // SINKRONISASI 1:1 DENGAN CAMERA KOTLIN (SCATTER_RATIO = 0.08)
+    const CAMERA_SCATTER_RATIO = 0.08; 
 
+    // Precomputed 16x16 DCT Matrices
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const invSqrtN = 1.0 / Math.sqrt(BLOCK_SIZE);
@@ -108,17 +124,16 @@
         }
     }
 
-    function getLuma(data, width, x, y) {
-        const idx = (y * width + x) * 4;
+    function getLumaAt(data, width, height, x, y) {
+        const px = Math.max(0, Math.min(width - 1, Math.floor(x)));
+        const py = Math.max(0, Math.min(height - 1, Math.floor(y)));
+        const idx = (py * width + px) * 4;
         return 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
     }
 
-    // Deteksi presisi batas atas & bawah foto berdasarkan lonjakan energi visual horizontal
     function detectExactPhotoBounds(data, width, height, canonicalAspect) {
-        // Hitung tinggi foto eksak yang seharusnya ada di layar
-        const exactTargetHeight = Math.round(width / canonicalAspect); // e.g. 1080 / (2560/1920) = 810 px
+        const exactTargetHeight = Math.round(width / canonicalAspect);
 
-        // Ukur rata-rata luma baris sepanjang horizontal (mengabaikan 30px margin kiri-kanan)
         const rowLumas = new Float64Array(height);
         for (let y = 0; y < height; y++) {
             let sum = 0.0;
@@ -131,37 +146,32 @@
             rowLumas[y] = count > 0 ? (sum / count) : 0;
         }
 
-        // Cari awal foto: Bilah hitam galeri berada di bawah status bar (y: 200 - 900)
-        // Di bilah hitam, luma < 8. Begitu masuk foto, luma melonjak drastis (> 20)
         let topY = -1;
-        for (let y = 300; y < Math.floor(height * 0.6); y++) {
-            // Cek apakah 5 baris sebelumnya adalah bilah hitam dan 5 baris berikutnya adalah foto
+        for (let y = 250; y < Math.floor(height * 0.65); y++) {
             if (rowLumas[y - 4] < 10 && rowLumas[y - 2] < 10 && rowLumas[y] >= 15 && rowLumas[y + 4] >= 15) {
                 topY = y;
                 break;
             }
         }
 
-        // Jika transisi tajam tidak ketemu (misal foto atasnya sangat gelap), gunakan kalkulasi tengah galeri
         if (topY <= 0) {
             topY = Math.round((height - exactTargetHeight) / 2);
         }
 
-        return {
-            x: 0,
-            y: topY,
-            w: width,
-            h: exactTargetHeight
-        };
+        return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImage(data, width, height, targetWidth, targetHeight, keyString) {
+    // AUDIT EKSKLUSIF: HANYA MEMERIKSA TITIK-TITIK YANG DISEGEL KAMERA SECARA UTUH
+    function auditEmbeddedScattersOnly(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
         let totalAudited = 0;
         let matchedBits = 0;
         let totalGapEnergy = 0.0;
+
+        const quadrantAudited = new Int32Array(16);
+        const quadrantMatched = new Int32Array(16);
 
         const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
         const blockLuma = new Float64Array(totalPixelsPerBlock);
@@ -171,79 +181,116 @@
         const scaleY = height / targetHeight;
 
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
+            const qY = Math.min(3, Math.floor((by / targetHeight) * 4));
+
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
-                const isSelected = rng() <= SCATTER_RATIO;
+                const qX = Math.min(3, Math.floor((bx / targetWidth) * 4));
+                const quadIdx = qY * 4 + qX;
 
-                let blockSumLuma = 0.0;
-
-                for (let y = 0; y < BLOCK_SIZE; y++) {
-                    const startY = (by + y) * scaleY;
-                    const endY = (by + y + 1) * scaleY;
-
-                    for (let x = 0; x < BLOCK_SIZE; x++) {
-                        const startX = (bx + x) * scaleX;
-                        const endX = (bx + x + 1) * scaleX;
-
-                        let subLumaSum = 0.0;
-                        let subSamples = 0;
-
-                        const minSY = Math.max(0, Math.floor(startY));
-                        const maxSY = Math.min(height - 1, Math.floor(endY));
-                        const minSX = Math.max(0, Math.floor(startX));
-                        const maxSX = Math.min(width - 1, Math.floor(endX));
-
-                        for (let sy = minSY; sy <= maxSY; sy++) {
-                            const rowOffset = sy * width * 4;
-                            for (let sx = minSX; sx <= maxSX; sx++) {
-                                const p = rowOffset + (sx * 4);
-                                subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                                subSamples++;
-                            }
-                        }
-
-                        const luma = subSamples > 0 
-                            ? (subLumaSum / subSamples) 
-                            : getLuma(data, width, Math.floor((startX + endX) / 2), Math.floor((startY + endY) / 2));
-
-                        blockSumLuma += luma;
-                        blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
-                    }
-                }
-
+                // Sinkron persis dengan iterasi RNG kamera
+                const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit1 = rng() > 0.5 ? 1 : 0;
                 const expectedBit2 = rng() > 0.5 ? 1 : 0;
 
+                // JIKA BLOK INI TIDAK DISUNTIK OLEH KAMERA, LEWATI
                 if (!isSelected) continue;
 
+                let blockSumLuma = 0.0;
+
+                if (!isDownscaled) {
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const rowIdx = ((by + y) * width + bx) * 4;
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const p = rowIdx + (x * 4);
+                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                        }
+                    }
+                } else {
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const startY = (by + y) * scaleY;
+                        const endY = (by + y + 1) * scaleY;
+
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const startX = (bx + x) * scaleX;
+                            const endX = (bx + x + 1) * scaleX;
+
+                            let subLumaSum = 0.0;
+                            let subSamples = 0;
+
+                            const minSY = Math.max(0, Math.floor(startY));
+                            const maxSY = Math.min(height - 1, Math.floor(endY));
+                            const minSX = Math.max(0, Math.floor(startX));
+                            const maxSX = Math.min(width - 1, Math.floor(endX));
+
+                            for (let sy = minSY; sy <= maxSY; sy++) {
+                                const rowOffset = sy * width * 4;
+                                for (let sx = minSX; sx <= maxSX; sx++) {
+                                    const p = rowOffset + (sx * 4);
+                                    subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                                    subSamples++;
+                                }
+                            }
+
+                            const luma = subSamples > 0 
+                                ? (subLumaSum / subSamples) 
+                                : getLumaAt(data, width, height, (startX + endX) / 2.0, (startY + endY) / 2.0);
+
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                        }
+                    }
+                }
+
+                // Sesuai filter saturasi di kamera (avgLuma < 25.0 || avgLuma > 230.0)
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
                 if (avgLuma < 25.0 || avgLuma > 230.0) continue;
 
                 fastForwardDCT16(blockLuma, dctCoefficients);
 
-                // Pair 1: (2,1) vs (1,2)
+                // Pair 1: Smooth Diagonal (2,1) vs (1,2)
                 const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                 const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                 const diff1 = c1 - c2;
                 const bit1 = diff1 > 0 ? 1 : 0;
-                if (bit1 === expectedBit1) matchedBits++;
+                if (bit1 === expectedBit1) {
+                    matchedBits++;
+                    quadrantMatched[quadIdx]++;
+                }
                 totalGapEnergy += Math.abs(diff1);
                 totalAudited++;
+                quadrantAudited[quadIdx]++;
 
-                // Pair 2: (3,1) vs (1,3)
+                // Pair 2: Harmonic Diagonal (3,1) vs (1,3)
                 const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
                 const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
                 const diff2 = c3 - c4;
                 const bit2 = diff2 > 0 ? 1 : 0;
-                if (bit2 === expectedBit2) matchedBits++;
+                if (bit2 === expectedBit2) {
+                    matchedBits++;
+                    quadrantMatched[quadIdx]++;
+                }
                 totalGapEnergy += Math.abs(diff2);
                 totalAudited++;
+                quadrantAudited[quadIdx]++;
             }
         }
 
         const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
         const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
 
-        return { matchRate, totalAudited, matchedBits, avgGap };
+        const quadrantScores = [];
+        let minQuadScore = 100.0;
+        for (let i = 0; i < 16; i++) {
+            const qRate = quadrantAudited[i] > 0 ? (quadrantMatched[i] / quadrantAudited[i]) * 100 : 50.0;
+            quadrantScores.push(qRate);
+            if (quadrantAudited[i] >= 10 && qRate < minQuadScore) {
+                minQuadScore = qRate;
+            }
+        }
+
+        return { matchRate, totalAudited, matchedBits, avgGap, quadrantScores, minQuadScore };
     }
 
     function verifyImage() {
@@ -252,8 +299,10 @@
         const resultBox = document.getElementById('resultBox');
         const resultTitle = document.getElementById('resultTitle');
         const resultMeta = document.getElementById('resultMeta');
+        const previewContainer = document.getElementById('previewContainer');
         const cropPreview = document.getElementById('cropPreview');
-        const previewTitle = document.getElementById('previewTitle');
+        const gridContainer = document.getElementById('gridContainer');
+        const heatmapGrid = document.getElementById('heatmapGrid');
 
         if (!rawKeyInput || !fileInput.files[0]) {
             alert('Please enter Master Key and select file!');
@@ -278,10 +327,9 @@
                 const canonicalWidth = parseInt(dimParts[0], 10);
                 const canonicalHeight = parseInt(dimParts[1], 10);
                 const canonicalAspect = canonicalWidth / canonicalHeight;
-
                 const screenAspect = nativeWidth / nativeHeight;
-                const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
 
+                const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
                 const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
                 let res, mode, threshold;
@@ -294,46 +342,78 @@
                     cropCanvas.height = canonicalHeight;
                     const cropCtx = cropCanvas.getContext('2d');
 
-                    // Potong murni frame TV foto saja
                     cropCtx.drawImage(
                         canvas,
                         bounds.x, bounds.y, bounds.w, bounds.h,
                         0, 0, canonicalWidth, canonicalHeight
                     );
 
-                    // Tampilkan pratinjau hasil crop di layar
-                    previewTitle.style.display = 'block';
+                    previewContainer.style.display = 'block';
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
-                    cropPreview.style.display = 'block';
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImage(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h} @ Y:${bounds.y}) &rarr; Canonical (${canonicalWidth}x${canonicalHeight})`;
+                    res = auditEmbeddedScattersOnly(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; Exact Scatter Synchronized`;
                     threshold = 60.0;
                 } else {
-                    previewTitle.style.display = 'none';
-                    cropPreview.style.display = 'none';
-                    res = auditImage(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput);
-                    mode = `Direct Camera Image (${nativeWidth}x${nativeHeight})`;
-                    threshold = 68.0;
+                    previewContainer.style.display = 'none';
+                    const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
+
+                    if (isExactNative) {
+                        res = auditEmbeddedScattersOnly(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight}) &rarr; 100% Scatter Audit`;
+                        threshold = 82.0;
+                    } else {
+                        res = auditEmbeddedScattersOnly(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        threshold = 68.0;
+                    }
+                }
+
+                // Render Heatmap 4x4
+                gridContainer.style.display = 'block';
+                heatmapGrid.innerHTML = '';
+                const quadrantThreshold = threshold - 6.0;
+                let hasTamperedQuadrant = false;
+
+                for (let i = 0; i < 16; i++) {
+                    const score = res.quadrantScores[i];
+                    const cell = document.createElement('div');
+                    cell.className = 'heatmap-cell';
+                    cell.innerText = `${Math.round(score)}%`;
+
+                    if (score >= quadrantThreshold) {
+                        cell.classList.add('cell-pass');
+                    } else {
+                        cell.classList.add('cell-fail');
+                        hasTamperedQuadrant = true;
+                    }
+                    heatmapGrid.appendChild(cell);
                 }
 
                 resultBox.style.display = 'block';
 
-                if (res.matchRate >= threshold) {
+                const isGloballyAuthentic = res.matchRate >= threshold;
+                // Anomali terdeteksi bila salah satu kuadran jatuh di bawah 56.0% (mendekati probabilitas acak)
+                const isTampered = hasTamperedQuadrant && (res.minQuadScore < 56.0);
+
+                if (isGloballyAuthentic && !isTampered) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
+                } else if (isTampered) {
+                    resultBox.className = "result-box invalid";
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED (Worst Area: ${res.minQuadScore.toFixed(1)}%)`;
                 } else {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 TAMPERED / FORGED (${res.matchRate.toFixed(2)}%)`;
+                    resultTitle.innerHTML = `🔴 FORGED / TAMPERED (${res.matchRate.toFixed(2)}%)`;
                 }
 
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
-                    <b>Detection Mode:</b> ${mode}<br>
-                    <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
-                    <b>Matched Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Threshold:</b> &ge; ${threshold.toFixed(2)}%
+                    <b>Audit Mode:</b> ${mode}<br>
+                    <b>Verified Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (100% of camera scatter)<br>
+                    <b>Lowest Quadrant Score:</b> ${res.minQuadScore.toFixed(1)}% (Threshold: &ge; ${quadrantThreshold.toFixed(1)}%)<br>
+                    <b>Global Threshold:</b> &ge; ${threshold.toFixed(2)}%
                 `;
             };
             img.src = e.target.result;
