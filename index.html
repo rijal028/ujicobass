@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Contrast-Filtered Verifier</title>
+    <title>SecurePixel Granular Cluster Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 640px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 680px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.4rem; margin-top: 0; color: #38bdf8; text-align: center; }
         .input-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
@@ -19,14 +19,14 @@
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
         
-        .grid-container { display: none; margin-top: 14px; text-align: center; }
-        .heatmap-grid { display: inline-grid; grid-template-columns: repeat(6, 44px); gap: 3px; padding: 8px; background: #0b0f19; border-radius: 6px; border: 1px solid #334155; }
-        .heatmap-cell { width: 44px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; border-radius: 3px; color: #fff; }
-        .cell-pass { background: rgba(16, 185, 129, 0.35); border: 1px solid #10b981; color: #34d399; }
-        .cell-fail { background: rgba(239, 68, 68, 0.55); border: 1px solid #ef4444; color: #fca5a5; }
-
         .preview-box { text-align: center; margin-top: 14px; display: none; }
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
+
+        .cluster-map-box { margin-top: 16px; text-align: center; display: none; }
+        #tamperCanvas { background: #020617; border: 1px solid #334155; border-radius: 6px; width: 100%; max-width: 480px; image-rendering: pixelated; margin-top: 6px; }
+        .legend { display: flex; justify-content: center; gap: 14px; font-size: 0.75rem; color: #94a3b8; margin-top: 6px; }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .dot { width: 10px; height: 10px; border-radius: 2px; }
 
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
         .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
@@ -38,7 +38,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Authenticity & Tamper Verifier</h1>
+    <h1>SecurePixel 2D Cluster Tamper Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -50,16 +50,22 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit Authenticity & Integrity</button>
+    <button onclick="verifyImage()">Audit Spatial Clusters & Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
         <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
-    <div id="gridContainer" class="grid-container">
-        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Disparity Heatmap (6x6 Regional Grid):</span><br>
-        <div id="heatmapGrid" class="heatmap-grid" style="margin-top: 6px;"></div>
+    <div id="clusterBox" class="cluster-map-box">
+        <span style="font-size: 0.85rem; color: #38bdf8; font-weight: bold;">Spatial Macroblock Damage Map</span><br>
+        <canvas id="tamperCanvas"></canvas>
+        <div class="legend">
+            <div class="legend-item"><div class="dot" style="background: #10b981;"></div> Intact (100%)</div>
+            <div class="legend-item"><div class="dot" style="background: #f59e0b;"></div> Degraded (50%)</div>
+            <div class="legend-item"><div class="dot" style="background: #ef4444;"></div> Collapsed (0%)</div>
+            <div class="legend-item"><div class="dot" style="background: #e11d48; border: 1px solid #fff;"></div> Tamper Cluster</div>
+        </div>
     </div>
 
     <div id="resultBox" class="result-box">
@@ -73,7 +79,6 @@
 <script>
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 0.15; 
-    const GRID_SIZE = 6; 
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -162,23 +167,24 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImage16(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    function auditImage2DCluster(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
+
+        const gridCols = Math.floor(targetWidth / BLOCK_SIZE);
+        const gridRows = Math.floor(targetHeight / BLOCK_SIZE);
+
+        // Status Tiap Blok: -1 = Tidak disuntik/skip, 2 = 100% cocok, 1 = 50% cocok, 0 = 0% cocok
+        const blockStatus = new Int8Array(gridCols * gridRows).fill(-1);
 
         let totalAudited = 0;
         let matchedBits = 0;
         let totalGapEnergy = 0.0;
 
-        // Penghitung Distribusi Skor Tiap Blok Makro (16x16)
         let totalBlocksAudited = 0;
-        let count100 = 0; // 2 bit cocok
-        let count50 = 0;  // 1 bit cocok
-        let count0 = 0;   // 0 bit cocok (kedua bit rontok)
-
-        const totalCells = GRID_SIZE * GRID_SIZE;
-        const cellAudited = new Int32Array(totalCells);
-        const cellMatched = new Int32Array(totalCells);
+        let count100 = 0;
+        let count50 = 0;
+        let count0 = 0;
 
         const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
         const blockLuma = new Float64Array(totalPixelsPerBlock);
@@ -187,12 +193,11 @@
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
-        for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
-            const cY = Math.min(GRID_SIZE - 1, Math.floor((by / targetHeight) * GRID_SIZE));
-
-            for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
-                const cX = Math.min(GRID_SIZE - 1, Math.floor((bx / targetWidth) * GRID_SIZE));
-                const cellIdx = cY * GRID_SIZE + cX;
+        for (let gy = 0; gy < gridRows; gy++) {
+            const by = gy * BLOCK_SIZE;
+            for (let gx = 0; gx < gridCols; gx++) {
+                const bx = gx * BLOCK_SIZE;
+                const blockIdx = gy * gridCols + gx;
 
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit1 = rng() > 0.5 ? 1 : 0;
@@ -251,7 +256,6 @@
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
                 if (avgLuma < 25.0 || avgLuma > 230.0) continue;
 
-                // FILTER KONTRAS EKSTREM DI SISI VERIFIER (SAMA DENGAN KAMERA)
                 let varianceSum = 0.0;
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     const diff = blockLuma[i] - avgLuma;
@@ -260,7 +264,6 @@
                 const variance = varianceSum / totalPixelsPerBlock;
                 if (variance > 1800.0) continue; 
 
-                // Kurangi 128 untuk DCT
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     blockLuma[i] -= 128.0;
                 }
@@ -276,12 +279,10 @@
                 const bit1 = diff1 > 0 ? 1 : 0;
                 if (bit1 === expectedBit1) {
                     matchedBits++;
-                    cellMatched[cellIdx]++;
                     blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff1);
                 totalAudited++;
-                cellAudited[cellIdx]++;
 
                 // Pair 2: Harmonic Diagonal (3,1) vs (1,3)
                 const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
@@ -290,51 +291,138 @@
                 const bit2 = diff2 > 0 ? 1 : 0;
                 if (bit2 === expectedBit2) {
                     matchedBits++;
-                    cellMatched[cellIdx]++;
                     blockMatches++;
                 }
                 totalGapEnergy += Math.abs(diff2);
                 totalAudited++;
-                cellAudited[cellIdx]++;
 
-                // Hitung Distribusi Blok Individu
                 totalBlocksAudited++;
+                blockStatus[blockIdx] = blockMatches;
+
                 if (blockMatches === 2) count100++;
                 else if (blockMatches === 1) count50++;
                 else count0++;
             }
         }
 
-        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
-        const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
+        // DETEKSI KLUSTER ANOMALI (8-Connected Cluster Analysis)
+        // Menemukan blok gagal (0% atau 50%) yang saling menempel membentuk garis/gumpalan editan
+        const visited = new Uint8Array(gridCols * gridRows);
+        let maxClusterSize = 0;
+        let tamperedClusters = [];
 
-        const cellScores = [];
-        let minCellScore = 100.0;
+        for (let gy = 0; gy < gridRows; gy++) {
+            for (let gx = 0; gx < gridCols; gx++) {
+                const idx = gy * gridCols + gx;
+                // Hanya periksa blok yang gagal (0 = 0% match, atau kombinasi berat)
+                if (visited[idx] || blockStatus[idx] !== 0) continue;
 
-        for (let i = 0; i < totalCells; i++) {
-            if (cellAudited[i] >= 8) {
-                const score = (cellMatched[i] / cellAudited[i]) * 100;
-                cellScores.push(score);
-                if (score < minCellScore) minCellScore = score;
-            } else {
-                cellScores.push(matchRate);
+                // BFS / Flood fill untuk menghitung ukuran kluster kerusakan
+                let queue = [[gx, gy]];
+                visited[idx] = 1;
+                let currentCluster = [];
+
+                while (queue.length > 0) {
+                    const [cx, cy] = queue.shift();
+                    currentCluster.push([cx, cy]);
+
+                    // Jelajahi tetangga 8-arah (radius 2 makroblok untuk menjembatani scatter)
+                    for (let dy = -2; dy <= 2; dy++) {
+                        for (let dx = -2; dx <= 2; dx++) {
+                            if (dx === 0 && dy === 0) continue;
+                            const nx = cx + dx;
+                            const ny = cy + dy;
+                            if (nx >= 0 && nx < gridCols && ny >= 0 && ny < gridRows) {
+                                const nIdx = ny * gridCols + nx;
+                                if (!visited[nIdx] && (blockStatus[nIdx] === 0 || blockStatus[nIdx] === 1)) {
+                                    visited[nIdx] = 1;
+                                    queue.push([nx, ny]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Hitung berapa banyak blok 0% murni di dalam kluster ini
+                const collapsedCount = currentCluster.filter(([x, y]) => blockStatus[y * gridCols + x] === 0).length;
+
+                if (collapsedCount > maxClusterSize) {
+                    maxClusterSize = collapsedCount;
+                }
+
+                // Ambang batas kluster: jika ada >= 4 blok runtuh yang saling bergandengan
+                if (collapsedCount >= 4) {
+                    tamperedClusters.push(currentCluster);
+                }
             }
         }
 
-        const maxDrop = matchRate - minCellScore;
+        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
+        const matchRate = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
+
         return { 
             matchRate, 
             totalAudited, 
             matchedBits, 
             avgGap, 
-            cellScores, 
-            minCellScore, 
-            maxDrop,
             totalBlocksAudited,
             count100,
             count50,
-            count0
+            count0,
+            gridCols,
+            gridRows,
+            blockStatus,
+            maxClusterSize,
+            tamperedClusters
         };
+    }
+
+    function renderTamperCanvas(res) {
+        const clusterBox = document.getElementById('clusterBox');
+        const canvas = document.getElementById('tamperCanvas');
+        clusterBox.style.display = 'block';
+
+        canvas.width = res.gridCols;
+        canvas.height = res.gridRows;
+        const ctx = canvas.getContext('2d');
+        const imgData = ctx.createImageData(res.gridCols, res.gridRows);
+
+        for (let y = 0; y < res.gridRows; y++) {
+            for (let x = 0; x < res.gridCols; x++) {
+                const idx = y * res.gridCols + x;
+                const p = idx * 4;
+                const status = res.blockStatus[idx];
+
+                if (status === 2) {
+                    // 100% Cocok (Hijau)
+                    imgData.data[p] = 16; imgData.data[p + 1] = 185; imgData.data[p + 2] = 129; imgData.data[p + 3] = 255;
+                } else if (status === 1) {
+                    // 50% Cocok (Oranye)
+                    imgData.data[p] = 245; imgData.data[p + 1] = 158; imgData.data[p + 2] = 11; imgData.data[p + 3] = 255;
+                } else if (status === 0) {
+                    // 0% Runtuh (Merah Terang)
+                    imgData.data[p] = 239; imgData.data[p + 1] = 68; imgData.data[p + 2] = 68; imgData.data[p + 3] = 255;
+                } else {
+                    // Tidak Disuntik / Rata (Abu-abu Gelap)
+                    imgData.data[p] = 15; imgData.data[p + 1] = 23; imgData.data[p + 2] = 42; imgData.data[p + 3] = 255;
+                }
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        // Beri sorotan kotak merah mencolok di kluster yang terindikasi dicoret/diedit
+        ctx.strokeStyle = '#f43f5e';
+        ctx.lineWidth = 1;
+        for (const cluster of res.tamperedClusters) {
+            let minX = res.gridCols, maxX = 0, minY = res.gridRows, maxY = 0;
+            for (const [cx, cy] of cluster) {
+                if (cx < minX) minX = cx;
+                if (cx > maxX) maxX = cx;
+                if (cy < minY) minY = cy;
+                if (cy > maxY) maxY = cy;
+            }
+            ctx.strokeRect(minX - 1, minY - 1, (maxX - minX) + 3, (maxY - minY) + 3);
+        }
     }
 
     function verifyImage() {
@@ -345,8 +433,6 @@
         const resultMeta = document.getElementById('resultMeta');
         const previewContainer = document.getElementById('previewContainer');
         const cropPreview = document.getElementById('cropPreview');
-        const gridContainer = document.getElementById('gridContainer');
-        const heatmapGrid = document.getElementById('heatmapGrid');
 
         if (!rawKeyInput || !fileInput.files[0]) {
             alert('Please enter Master Key and select file!');
@@ -396,58 +482,39 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImage16(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Disparity`;
+                    res = auditImage2DCluster(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 2D Spatial Cluster`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditImage16(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture 16x16 (${nativeWidth}x${nativeHeight})`;
+                        res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
                         threshold = 80.0;
                     } else {
-                        res = auditImage16(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media 16x16 (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        res = auditImage2DCluster(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
                         threshold = 65.0;
                     }
                 }
 
-                // Render Heatmap 6x6
-                gridContainer.style.display = 'block';
-                heatmapGrid.innerHTML = '';
-                
-                const allowedDropLimit = 16.0;
-                let hasTamperedZone = false;
-
-                for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
-                    const score = res.cellScores[i];
-                    const cell = document.createElement('div');
-                    cell.className = 'heatmap-cell';
-                    cell.innerText = `${Math.round(score)}%`;
-
-                    const localDrop = res.matchRate - score;
-                    if (localDrop > allowedDropLimit || score < 54.0) {
-                        cell.classList.add('cell-fail');
-                        hasTamperedZone = true;
-                    } else {
-                        cell.classList.add('cell-pass');
-                    }
-                    heatmapGrid.appendChild(cell);
-                }
-
+                renderTamperCanvas(res);
                 resultBox.style.display = 'block';
 
                 const isGloballyAuthentic = res.matchRate >= threshold;
-                const isLocalTamperDetected = hasTamperedZone && (res.maxDrop > allowedDropLimit);
+                // VONIS INTEGRITAS:
+                // Jika ditemukan kluster blok runtuh (collapsed blocks) >= 4 yang bergandengan,
+                // langsung jatuhkan vonis pemalsuan lokal!
+                const isLocalTamperDetected = res.tamperedClusters.length > 0;
 
                 if (isGloballyAuthentic && !isLocalTamperDetected) {
                     resultBox.className = "result-box valid";
                     resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRate.toFixed(2)}%)`;
                 } else if (isLocalTamperDetected) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (Worst Block: ${res.minCellScore.toFixed(1)}% | Drop: -${res.maxDrop.toFixed(1)}%)`;
+                    resultTitle.innerHTML = `🔴 LOCAL TAMPERING DETECTED! (${res.tamperedClusters.length} suspicious cluster(s) found | Max cluster: ${res.maxClusterSize} collapsed blocks)`;
                 } else {
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRate.toFixed(2)}%)`;
@@ -461,7 +528,7 @@
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
                     <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
-                    <b>Spatial Consistency:</b> Worst block = ${res.minCellScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
+                    <b>Spatial Cluster Status:</b> ${isLocalTamperDetected ? `<span style="color:#f87171; font-weight:bold;">ALERT: Contiguous block destruction detected (${res.maxClusterSize} connected collapsed blocks).</span>` : '<span style="color:#34d399;">PASS: Isolated noise only, no contiguous clusters found.</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}<br>
 
                     <div class="distribution-box">
