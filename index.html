@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 8x8 Micro-Block Verifier</title>
+    <title>SecurePixel 16x16 Feath-Block Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -32,7 +32,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel 8x8 Micro-Block Verifier</h1>
+    <h1>SecurePixel Authenticity & Tamper Verifier</h1>
     
     <div class="input-group">
         <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
@@ -44,7 +44,7 @@
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
     </div>
 
-    <button onclick="verifyImage()">Audit 8x8 Granular Grid</button>
+    <button onclick="verifyImage()">Audit Authenticity & Integrity</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -52,7 +52,7 @@
     </div>
 
     <div id="gridContainer" class="grid-container">
-        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Disparity Heatmap (6x6 Grid):</span><br>
+        <span style="font-size: 0.8rem; color: #94a3b8;">Spatial Disparity Heatmap (6x6 Regional Grid):</span><br>
         <div id="heatmapGrid" class="heatmap-grid" style="margin-top: 6px;"></div>
     </div>
 
@@ -65,7 +65,7 @@
 <canvas id="canvas" style="display: none;"></canvas>
 
 <script>
-    const BLOCK_SIZE = 16; // BERALIH KE 8x8 MICRO-BLOCK
+    const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 0.15; 
     const GRID_SIZE = 6; 
 
@@ -156,8 +156,8 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImage8x8(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
-        const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16"); // Tetap pertahankan seed string
+    function auditImage16(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+        const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
         let totalAudited = 0;
@@ -241,9 +241,9 @@
 
                 fastForwardDCT(blockLuma, dctCoefficients);
 
-                // Pair 1: (3,2) vs (2,3)
-                const c1 = dctCoefficients[3 * BLOCK_SIZE + 2];
-                const c2 = dctCoefficients[2 * BLOCK_SIZE + 3];
+                // Pair 1: Smooth Diagonal (2,1) vs (1,2)
+                const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
+                const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                 const diff1 = c1 - c2;
                 const bit1 = diff1 > 0 ? 1 : 0;
                 if (bit1 === expectedBit1) {
@@ -254,9 +254,9 @@
                 totalAudited++;
                 cellAudited[cellIdx]++;
 
-                // Pair 2: (4,1) vs (1,4)
-                const c3 = dctCoefficients[4 * BLOCK_SIZE + 1];
-                const c4 = dctCoefficients[1 * BLOCK_SIZE + 4];
+                // Pair 2: Harmonic Diagonal (3,1) vs (1,3)
+                const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
+                const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
                 const diff2 = c3 - c4;
                 const bit2 = diff2 > 0 ? 1 : 0;
                 if (bit2 === expectedBit2) {
@@ -276,7 +276,7 @@
         let minCellScore = 100.0;
 
         for (let i = 0; i < totalCells; i++) {
-            if (cellAudited[i] >= 15) {
+            if (cellAudited[i] >= 10) {
                 const score = (cellMatched[i] / cellAudited[i]) * 100;
                 cellScores.push(score);
                 if (score < minCellScore) minCellScore = score;
@@ -348,20 +348,20 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImage8x8(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 8x8 Granular Grid`;
+                    res = auditImage16(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Spatial Disparity`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditImage8x8(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        mode = `Direct Native Capture 8x8 (${nativeWidth}x${nativeHeight})`;
-                        threshold = 78.0;
+                        res = auditImage16(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        mode = `Direct Native Capture 16x16 (${nativeWidth}x${nativeHeight})`;
+                        threshold = 80.0;
                     } else {
-                        res = auditImage8x8(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        mode = `Compressed Social Media 8x8 (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
+                        res = auditImage16(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        mode = `Compressed Social Media 16x16 (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
                         threshold = 66.0;
                     }
                 }
@@ -370,7 +370,7 @@
                 gridContainer.style.display = 'block';
                 heatmapGrid.innerHTML = '';
                 
-                const allowedDropLimit = 15.0;
+                const allowedDropLimit = 16.0;
                 let hasTamperedZone = false;
 
                 for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
@@ -408,7 +408,7 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (8x8 micro-blocks)<br>
+                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (16x16 smooth macroblocks)<br>
                     <b>Spatial Consistency:</b> Worst block = ${res.minCellScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}
                 `;
