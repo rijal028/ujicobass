@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 16x16 Feath-Block Verifier</title>
+    <title>SecurePixel Contrast-Filtered Verifier</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -197,7 +197,7 @@
                             const p = rowIdx + (x * 4);
                             const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
                             blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                            blockLuma[y * BLOCK_SIZE + x] = luma;
                         }
                     }
                 } else {
@@ -231,13 +231,27 @@
                                 : getLumaAt(data, width, height, (startX + endX) / 2.0, (startY + endY) / 2.0);
 
                             blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma - 128.0;
+                            blockLuma[y * BLOCK_SIZE + x] = luma;
                         }
                     }
                 }
 
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
                 if (avgLuma < 25.0 || avgLuma > 230.0) continue;
+
+                // FILTER KONTRAS EKSTREM DI SISI VERIFIER (SAMA DENGAN KAMERA)
+                let varianceSum = 0.0;
+                for (let i = 0; i < totalPixelsPerBlock; i++) {
+                    const diff = blockLuma[i] - avgLuma;
+                    varianceSum += diff * diff;
+                }
+                const variance = varianceSum / totalPixelsPerBlock;
+                if (variance > 1800.0) continue; // Lewati area teks/kontras ekstrem
+
+                // Kurangi 128 untuk DCT
+                for (let i = 0; i < totalPixelsPerBlock; i++) {
+                    blockLuma[i] -= 128.0;
+                }
 
                 fastForwardDCT(blockLuma, dctCoefficients);
 
@@ -276,7 +290,7 @@
         let minCellScore = 100.0;
 
         for (let i = 0; i < totalCells; i++) {
-            if (cellAudited[i] >= 10) {
+            if (cellAudited[i] >= 8) {
                 const score = (cellMatched[i] / cellAudited[i]) * 100;
                 cellScores.push(score);
                 if (score < minCellScore) minCellScore = score;
@@ -349,7 +363,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = auditImage16(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Spatial Disparity`;
+                    mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h}) &rarr; 16x16 Disparity`;
                     threshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -362,7 +376,7 @@
                     } else {
                         res = auditImage16(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         mode = `Compressed Social Media 16x16 (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
-                        threshold = 66.0;
+                        threshold = 65.0;
                     }
                 }
 
@@ -380,7 +394,7 @@
                     cell.innerText = `${Math.round(score)}%`;
 
                     const localDrop = res.matchRate - score;
-                    if (localDrop > allowedDropLimit || score < 55.0) {
+                    if (localDrop > allowedDropLimit || score < 54.0) {
                         cell.classList.add('cell-fail');
                         hasTamperedZone = true;
                     } else {
@@ -408,7 +422,7 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits (16x16 smooth macroblocks)<br>
+                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
                     <b>Spatial Consistency:</b> Worst block = ${res.minCellScore.toFixed(1)}% (Maximum allowed drop: ${allowedDropLimit.toFixed(1)}%)<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(2)}
                 `;
