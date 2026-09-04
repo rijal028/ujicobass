@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Dual-Layer Forensic Engine</title>
+    <title>SecurePixel Dual-Layer Forensic Engine (50% Scatter)</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -40,7 +40,7 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Dual-Layer Forensic Engine</h1>
+    <h1>SecurePixel Dual-Layer Forensic Engine (50% Scatter)</h1>
 
     <div class="input-group">
         <label for="imageInput">Pilih Berkas Foto (Foto Asli Kamera / Medsos / Screenshot):</label>
@@ -53,7 +53,7 @@
     </div>
 
     <div class="input-group">
-        <label for="baselinePassive">Baseline Passive Bitstream 65% (Kunci Audit Dokumen Asli):</label>
+        <label for="baselinePassive">Baseline Passive Bitstream (Kunci Audit Dokumen Asli):</label>
         <textarea id="baselinePassive" placeholder="Dihasilkan dari Langkah 1 (Foto Asli Kanonikal). Digunakan untuk mendeteksi edit mikro tulisan/angka pada foto asli."></textarea>
     </div>
 
@@ -63,7 +63,7 @@
     </div>
 
     <div id="previewContainer" class="preview-box">
-        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Presisi:</span><br>
+        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris (Bebas Bar Navigasi):</span><br>
         <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
@@ -82,7 +82,7 @@
 
 <script>
     const BLOCK_SIZE = 16; 
-    const CAMERA_SCATTER_RATIO = 0.35; 
+    const CAMERA_SCATTER_RATIO = 0.50; // Dinaikkan ke 50% untuk kerapatan maksimal
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -149,39 +149,17 @@
         }
     }
 
-    // Deteksi foto di screenshot dengan mencari batas simetris tengah
-    function detectCenteredPhotoBounds(data, width, height, canonicalAspect) {
+    // Pemotongan murni geometris simetris tengah
+    function detectCenteredPhotoBounds(width, height, canonicalAspect) {
         const exactTargetHeight = Math.round(width / canonicalAspect);
-        const rowLumas = new Float64Array(height);
-        
-        for (let y = 0; y < height; y++) {
-            let sum = 0.0;
-            let count = 0;
-            for (let x = 40; x < width - 40; x += 20) {
-                const idx = (y * width + x) * 4;
-                sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-                count++;
-            }
-            rowLumas[y] = count > 0 ? (sum / count) : 0;
-        }
+        const topY = Math.max(0, Math.round((height - exactTargetHeight) / 2));
 
-        // Lompat area status bar atas (lewati minimal 120 px)
-        let topY = -1;
-        const scanLimit = Math.floor(height * 0.6);
-        for (let y = 140; y < scanLimit; y++) {
-            // Deteksi transisi dari latar gelap/hitam ke foto
-            if (rowLumas[y - 6] < 15 && rowLumas[y - 2] < 15 && rowLumas[y] >= 18 && rowLumas[y + 6] >= 18) {
-                topY = y;
-                break;
-            }
-        }
-
-        // Jika tidak ada perubahan kontras jelas, gunakan titik tengah simetris layar
-        if (topY <= 0 || (topY + exactTargetHeight > height)) {
-            topY = Math.max(0, Math.round((height - exactTargetHeight) / 2));
-        }
-
-        return { x: 0, y: topY, w: width, h: exactTargetHeight };
+        return { 
+            x: 0, 
+            y: topY, 
+            w: width, 
+            h: exactTargetHeight 
+        };
     }
 
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled, passiveBaselineB64) {
@@ -282,7 +260,7 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isVisualSafe) {
-                    // LAPISAN 1: AKTIF (35%)
+                    // LAPISAN 1: AKTIF (50%)
                     let blockMatches = 0;
 
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
@@ -309,7 +287,7 @@
                     else if (blockMatches === 1) count50++;
                     else count0++;
                 } else {
-                    // LAPISAN 2: PASIF (65%)
+                    // LAPISAN 2: PASIF (50% SISANYA)
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                     const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const naturalBit = c1 > c2 ? 1 : 0;
@@ -383,9 +361,9 @@
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
-                // CEK INTEGRITAS PENDAFTARAN AWAL
+                // Validasi registrasi: Hanya kanonikal asli yang berhak jadi master
                 if (mode === 'extract_native' && !isExactNative) {
-                    alert(`PENDAFTARAN DITOLAK: File ini beresolusi ${nativeWidth}x${nativeHeight} (Bukan Foto Asli ${canonicalWidth}x${canonicalHeight}).\nHanya foto kanonikal asli dari kamera yang berhak mendaftarkan segel!`);
+                    alert(`PENDAFTARAN DITOLAK: Berkas ini beresolusi ${nativeWidth}x${nativeHeight} (Bukan Foto Asli ${canonicalWidth}x${canonicalHeight}).\nHanya foto kanonikal asli dari kamera yang berhak mendaftarkan segel!`);
                     return;
                 }
 
@@ -401,7 +379,8 @@
                 let res, auditMode, activeThreshold;
 
                 if (isScreenshot) {
-                    const bounds = detectCenteredPhotoBounds(rawData, nativeWidth, nativeHeight, canonicalAspect);
+                    // Gunakan pemotongan geometris simetris
+                    const bounds = detectCenteredPhotoBounds(nativeWidth, nativeHeight, canonicalAspect);
 
                     const cropCanvas = document.createElement('canvas');
                     cropCanvas.width = canonicalWidth;
@@ -419,7 +398,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, baselinePassive);
-                    auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
+                    auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h} @ Y:${bounds.y})`;
                     activeThreshold = 60.0;
                 } else {
                     previewContainer.style.display = 'none';
@@ -450,8 +429,8 @@
 
                     resultMeta.innerHTML = `
                         <b>Master Key:</b> ${rawKeyInput}<br>
-                        <b>Kecocokan Asal (Lapisan Aktif):</b> ${res.activeMatchRate.toFixed(4)}% (Lolos Segel)<br>
-                        <b>Bitstream Pasif (65%):</b> ${res.generatedPassiveBase64.length} karakter Base64 terkunci di database.
+                        <b>Kecocokan Asal (Lapisan Aktif 50%):</b> ${res.activeMatchRate.toFixed(4)}% (Lolos Segel)<br>
+                        <b>Bitstream Pasif (50% Sisa):</b> ${res.generatedPassiveBase64.length} karakter Base64 terkunci di database.
                     `;
 
                     const supabasePayload = {
@@ -471,8 +450,7 @@
                     const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
                     const hasPassiveAudit = res.totalPassiveAudited > 0;
                     
-                    // Audit pasif mikro hanya dievaluasi jika file adalah NATIVE
-                    // Untuk WhatsApp/Screenshot, kompresi JPEG wajar merusak pasif ke ~50%
+                    // Audit pasif mikro hanya dievaluasi pada NATIVE
                     const evaluatePassive = isExactNative && hasPassiveAudit;
                     const isMicroTampered = evaluatePassive && (res.passiveMatchRate < 92.0);
 
@@ -496,16 +474,16 @@
                     if (isExactNative) {
                         passiveInfoText = hasPassiveAudit 
                             ? `${res.matchedPassiveBits.toLocaleString()} / ${res.totalPassiveAudited.toLocaleString()} bits (${res.passiveMatchRate.toFixed(2)}%)`
-                            : '<span style="color:#94a3b8;">Tidak diaudit (Baseline 65% kosong)</span>';
+                            : '<span style="color:#94a3b8;">Tidak diaudit (Baseline kosong)</span>';
                     } else {
-                        passiveInfoText = '<span style="color:#38bdf8;">Dilewati (Kompresi Medsos mengacak bit mikro alami)</span>';
+                        passiveInfoText = '<span style="color:#38bdf8;">Dilewati (Kuantisasi kompresi mengacak bit mikro alami)</span>';
                     }
 
                     resultMeta.innerHTML = `
                         <b>Master Key:</b> ${rawKeyInput}<br>
                         <b>Mode Audit:</b> ${auditMode}<br>
-                        <b>Lapisan Aktif (35% Asal Kamera):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
-                        <b>Lapisan Pasif (65% Integritas Mikro):</b> ${passiveInfoText}<br>
+                        <b>Lapisan Aktif (50% Asal Kamera):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                        <b>Lapisan Pasif (50% Integritas Mikro):</b> ${passiveInfoText}<br>
 
                         <div class="distribution-box">
                             <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
