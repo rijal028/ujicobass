@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Ultra-Precision Forensic Verifier</title>
+    <title>SecurePixel Dual-Layer Forensic Verifier</title>
+    <!-- EXIF Parser Library -->
+    <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -16,6 +18,7 @@
         button:hover { background-color: #0369a1; }
         .result-box { margin-top: 20px; padding: 16px; border-radius: 8px; display: none; }
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
+        .tampered { background-color: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #fbbf24; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.6; }
         
@@ -24,6 +27,10 @@
 
         .fingerprint-box { background: #020617; border: 1px dashed #38bdf8; border-radius: 6px; padding: 12px; margin-top: 14px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; }
         .fingerprint-val { color: #38bdf8; font-weight: bold; word-break: break-all; }
+
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-bottom: 6px; }
+        .badge-detected { background: #0284c7; color: #fff; }
+        .badge-none { background: #475569; color: #cbd5e1; }
 
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
         .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
@@ -35,19 +42,21 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Ultra-Precision Forensic Verifier</h1>
-    
-    <div class="input-group">
-        <label for="keyInput">Master Key (Format: TIMESTAMP_WIDTHxHEIGHT):</label>
-        <input type="text" id="keyInput" placeholder="Example: 1788254684998_2560x1920">
-    </div>
+    <h1>SecurePixel Dual-Layer Forensic Verifier</h1>
 
     <div class="input-group">
         <label for="imageInput">Select Image File (Native, WhatsApp/FB, or Screenshot):</label>
-        <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp">
+        <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="handleFileSelect()">
     </div>
 
-    <button onclick="verifyImage()">Extract Precision Forensic Signature</button>
+    <div class="input-group">
+        <label for="keyInput">Master Key: <span id="exifBadge" class="badge badge-none">No EXIF Loaded</span></label>
+        <input type="text" id="keyInput" placeholder="Auto-detected from EXIF or enter: 1788254684998_2560x1920">
+    </div>
+
+    <input type="hidden" id="passiveBitstreamInput">
+
+    <button onclick="verifyImage()">Extract & Verify Dual-Layer Signature</button>
 
     <div id="previewContainer" class="preview-box">
         <span style="font-size: 0.8rem; color: #94a3b8;">Cropped Area Preview (Photo Only):</span><br>
@@ -158,18 +167,66 @@
         return { x: 0, y: topY, w: width, h: exactTargetHeight };
     }
 
-    function auditImagePrecision(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    // Ekstraksi EXIF Otomatis saat gambar dipilih
+    async function handleFileSelect() {
+        const fileInput = document.getElementById('imageInput');
+        const keyInput = document.getElementById('keyInput');
+        const passiveInput = document.getElementById('passiveBitstreamInput');
+        const badge = document.getElementById('exifBadge');
+
+        if (!fileInput.files || !fileInput.files[0]) return;
+        const file = fileInput.files[0];
+
+        try {
+            const exifData = await exifr.parse(file, ['UserComment']);
+            if (exifData && exifData.UserComment) {
+                const comment = typeof exifData.UserComment === 'string' 
+                    ? exifData.UserComment 
+                    : new TextDecoder().decode(exifData.UserComment);
+
+                if (comment.startsWith('SECUREPIXEL_V2|')) {
+                    const parts = comment.split('|');
+                    keyInput.value = parts[1];
+                    passiveInput.value = parts[2];
+
+                    badge.className = "badge badge-detected";
+                    badge.innerText = `EXIF V2 Auto-Detected (${parts[2].length} chars)`;
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn("EXIF extraction error:", e);
+        }
+
+        badge.className = "badge badge-none";
+        badge.innerText = "No Embedded EXIF";
+        passiveInput.value = "";
+    }
+
+    function auditDualLayerPrecision(data, width, height, targetWidth, targetHeight, keyString, isDownscaled, passiveBaselineB64) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
-        let totalAudited = 0;
-        let matchedBits = 0;
+        // Layer 1 (Aktif 35%)
+        let totalActiveAudited = 0;
+        let matchedActiveBits = 0;
         let totalGapEnergy = 0.0;
-
         let totalBlocksAudited = 0;
         let count100 = 0;
         let count50 = 0;
         let count0 = 0;
+
+        // Layer 2 (Pasif 65%)
+        let passiveExpectedBytes = null;
+        if (passiveBaselineB64) {
+            const binStr = atob(passiveBaselineB64);
+            passiveExpectedBytes = new Uint8Array(binStr.length);
+            for (let i = 0; i < binStr.length; i++) passiveExpectedBytes[i] = binStr.charCodeAt(i);
+        }
+
+        let totalPassiveAudited = 0;
+        let matchedPassiveBits = 0;
+        let passiveBitPointer = 0;
 
         const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
         const blockLuma = new Float64Array(totalPixelsPerBlock);
@@ -183,8 +240,6 @@
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit1 = rng() > 0.5 ? 1 : 0;
                 const expectedBit2 = rng() > 0.5 ? 1 : 0;
-
-                if (!isSelected) continue;
 
                 let blockSumLuma = 0.0;
 
@@ -235,15 +290,14 @@
                 }
 
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
-                if (avgLuma < 25.0 || avgLuma > 230.0) continue;
-
                 let varianceSum = 0.0;
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     const diff = blockLuma[i] - avgLuma;
                     varianceSum += diff * diff;
                 }
                 const variance = varianceSum / totalPixelsPerBlock;
-                if (variance > 1800.0) continue; 
+
+                const isVisualSafe = (avgLuma in [25.0, 230.0] || (avgLuma >= 25.0 && avgLuma <= 230.0)) && (variance <= 1800.0);
 
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     blockLuma[i] -= 128.0;
@@ -251,58 +305,82 @@
 
                 fastForwardDCT(blockLuma, dctCoefficients);
 
-                let blockMatches = 0;
+                if (isSelected && isVisualSafe) {
+                    // AUDIT LAYER 1 (Aktif 35%)
+                    let blockMatches = 0;
 
-                // Pair 1
-                const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
-                const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
-                const diff1 = c1 - c2;
-                const bit1 = diff1 > 0 ? 1 : 0;
-                if (bit1 === expectedBit1) {
-                    matchedBits++;
-                    blockMatches++;
+                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
+                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
+                    const diff1 = c1 - c2;
+                    const bit1 = diff1 > 0 ? 1 : 0;
+                    if (bit1 === expectedBit1) {
+                        matchedActiveBits++;
+                        blockMatches++;
+                    }
+                    totalGapEnergy += Math.abs(diff1);
+                    totalActiveAudited++;
+
+                    const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
+                    const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
+                    const diff2 = c3 - c4;
+                    const bit2 = diff2 > 0 ? 1 : 0;
+                    if (bit2 === expectedBit2) {
+                        matchedActiveBits++;
+                        blockMatches++;
+                    }
+                    totalGapEnergy += Math.abs(diff2);
+                    totalActiveAudited++;
+
+                    totalBlocksAudited++;
+                    if (blockMatches === 2) count100++;
+                    else if (blockMatches === 1) count50++;
+                    else count0++;
+                } else {
+                    // AUDIT LAYER 2 (Pasif 65%)
+                    if (passiveExpectedBytes) {
+                        const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
+                        const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
+                        const naturalBit = c1 > c2 ? 1 : 0;
+
+                        const byteIdx = Math.floor(passiveBitPointer / 8);
+                        const bitOffset = 7 - (passiveBitPointer % 8);
+
+                        if (byteIdx < passiveExpectedBytes.length) {
+                            const expectedBit = (passiveExpectedBytes[byteIdx] >> bitOffset) & 1;
+                            if (naturalBit === expectedBit) {
+                                matchedPassiveBits++;
+                            }
+                            totalPassiveAudited++;
+                        }
+                        passiveBitPointer++;
+                    }
                 }
-                totalGapEnergy += Math.abs(diff1);
-                totalAudited++;
-
-                // Pair 2
-                const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
-                const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
-                const diff2 = c3 - c4;
-                const bit2 = diff2 > 0 ? 1 : 0;
-                if (bit2 === expectedBit2) {
-                    matchedBits++;
-                    blockMatches++;
-                }
-                totalGapEnergy += Math.abs(diff2);
-                totalAudited++;
-
-                totalBlocksAudited++;
-                if (blockMatches === 2) count100++;
-                else if (blockMatches === 1) count50++;
-                else count0++;
             }
         }
 
-        // Hitung presisi Float64 murni tanpa pembulatan awal
-        const matchRateFloat = totalAudited > 0 ? (matchedBits / totalAudited) * 100 : 0;
-        const avgGap = totalAudited > 0 ? (totalGapEnergy / totalAudited) : 0;
+        const activeMatchRate = totalActiveAudited > 0 ? (matchedActiveBits / totalActiveAudited) * 100 : 0;
+        const passiveMatchRate = totalPassiveAudited > 0 ? (matchedPassiveBits / totalPassiveAudited) * 100 : 0;
+        const avgGap = totalActiveAudited > 0 ? (totalGapEnergy / totalActiveAudited) : 0;
 
         return { 
-            matchRateFloat, 
-            totalAudited, 
-            matchedBits, 
+            activeMatchRate, 
+            totalActiveAudited, 
+            matchedActiveBits, 
             totalGapEnergy,
             avgGap, 
             totalBlocksAudited,
             count100,
             count50,
-            count0
+            count0,
+            totalPassiveAudited,
+            matchedPassiveBits,
+            passiveMatchRate
         };
     }
 
     function verifyImage() {
         const rawKeyInput = document.getElementById('keyInput').value.trim();
+        const passiveB64 = document.getElementById('passiveBitstreamInput').value.trim();
         const fileInput = document.getElementById('imageInput');
         const resultBox = document.getElementById('resultBox');
         const resultTitle = document.getElementById('resultTitle');
@@ -312,7 +390,7 @@
         const cropPreview = document.getElementById('cropPreview');
 
         if (!rawKeyInput || !fileInput.files[0]) {
-            alert('Please enter Master Key and select file!');
+            alert('Please select a file or enter Master Key!');
             return;
         }
 
@@ -359,7 +437,7 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = auditImagePrecision(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    res = auditDualLayerPrecision(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, passiveB64);
                     mode = `Screenshot Auto-Cropped (${bounds.w}x${bounds.h})`;
                     threshold = 60.0;
                 } else {
@@ -367,25 +445,30 @@
                     const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = auditImagePrecision(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                        res = auditDualLayerPrecision(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, passiveB64);
                         mode = `Direct Native Capture (${nativeWidth}x${nativeHeight})`;
                         threshold = 80.0;
                     } else {
-                        res = auditImagePrecision(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                        res = auditDualLayerPrecision(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true, passiveB64);
                         mode = `Compressed Social Media (${nativeWidth}x${nativeHeight} &rarr; ${canonicalWidth}x${canonicalHeight})`;
                         threshold = 65.0;
                     }
                 }
 
                 resultBox.style.display = 'block';
-                const isAuthentic = res.matchRateFloat >= threshold;
+                const isOriginAuthentic = res.activeMatchRate >= threshold;
+                const hasPassiveLayer = res.totalPassiveAudited > 0;
+                const isPassiveTampered = hasPassiveLayer && res.passiveMatchRate < 92.0;
 
-                if (isAuthentic) {
-                    resultBox.className = "result-box valid";
-                    resultTitle.innerHTML = `🟢 AUTHENTIC / VERIFIED (${res.matchRateFloat.toFixed(4)}%)`;
-                } else {
+                if (!isOriginAuthentic) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.matchRateFloat.toFixed(4)}%)`;
+                    resultTitle.innerHTML = `🔴 FORGED / UNMATCHED KEY (${res.activeMatchRate.toFixed(2)}%)`;
+                } else if (isPassiveTampered) {
+                    resultBox.className = "result-box tampered";
+                    resultTitle.innerHTML = `🟡 ORIGIN VALID, BUT MICRO-TAMPER DETECTED (${res.passiveMatchRate.toFixed(2)}% Passive Match)`;
+                } else {
+                    resultBox.className = "result-box valid";
+                    resultTitle.innerHTML = `🟢 100% AUTHENTIC & UNTOUCHED (${res.activeMatchRate.toFixed(2)}%)`;
                 }
 
                 const p100 = ((res.count100 / res.totalBlocksAudited) * 100).toFixed(1);
@@ -395,7 +478,8 @@
                 resultMeta.innerHTML = `
                     <b>Bound Master Key:</b> ${rawKeyInput}<br>
                     <b>Audit Mode:</b> ${mode}<br>
-                    <b>Audited Embedded Bits:</b> ${res.matchedBits.toLocaleString()} / ${res.totalAudited.toLocaleString()} bits<br>
+                    <b>Active Layer (35% PRNG Origin):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(4)}%)<br>
+                    <b>Passive Layer (65% Document Micro-Seal):</b> ${hasPassiveLayer ? `${res.matchedPassiveBits.toLocaleString()} / ${res.totalPassiveAudited.toLocaleString()} bits (${res.passiveMatchRate.toFixed(4)}%)` : '<span style="color:#94a3b8;">Not in EXIF / Stripped by Medsos</span>'}<br>
                     <b>Average Differential Gap:</b> ${res.avgGap.toFixed(4)}<br>
 
                     <div class="distribution-box">
@@ -414,15 +498,15 @@
                 // JSON Payload Presisi Tinggi untuk Database
                 const payload = {
                     master_key: rawKeyInput,
-                    precision_match_rate: res.matchRateFloat.toFixed(14),
-                    matched_bits: res.matchedBits,
-                    total_audited_bits: res.totalAudited,
+                    precision_match_rate: res.activeMatchRate.toFixed(14),
+                    matched_bits: res.matchedActiveBits,
+                    total_audited_bits: res.totalActiveAudited,
                     total_gap_energy: res.totalGapEnergy.toFixed(6),
-                    macroblock_health: {
-                        count_100: res.count100,
-                        count_50: res.count50,
-                        count_0: res.count0
-                    }
+                    passive_layer: hasPassiveLayer ? {
+                        matched_passive_bits: res.matchedPassiveBits,
+                        total_passive_bits: res.totalPassiveAudited,
+                        match_rate: res.passiveMatchRate.toFixed(6)
+                    } : null
                 };
 
                 jsonPayload.innerText = JSON.stringify(payload, null, 2);
