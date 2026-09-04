@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 100% Full-Surface Forensic Engine</title>
+    <title>SecurePixel 12MP UHD Forensic Engine</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 820px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 860px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.3rem; margin-top: 0; color: #38bdf8; text-align: center; }
         .input-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
@@ -25,7 +25,6 @@
         .preview-box { text-align: center; margin-top: 14px; display: none; }
         .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
 
-        /* Heatmap Canvas Container */
         .heatmap-wrapper { margin-top: 18px; text-align: center; display: none; background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 14px; }
         .heatmap-canvas-container { position: relative; display: inline-block; max-width: 100%; border-radius: 6px; overflow: hidden; border: 1px solid #475569; }
         .heatmap-canvas-container canvas { display: block; max-width: 100%; height: auto; }
@@ -46,39 +45,39 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Forensic Engine (100% Full-Surface Grid)</h1>
+    <h1>SecurePixel 12MP UHD Forensic Engine</h1>
 
     <div class="input-group">
-        <label for="imageInput">Pilih Berkas Citra (Foto Asli Kamera / Medsos / Screenshot):</label>
+        <label for="imageInput">Pilih Berkas Citra (Asli 12MP / Medsos / Screenshot):</label>
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
     </div>
 
     <div class="input-group">
-        <label for="keyInput">Master Key (Otomatis terdeteksi dari nama berkas atau isi manual):</label>
-        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_2560x1920">
+        <label for="keyInput">Master Key (Terdeteksi otomatis dari nama berkas):</label>
+        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_4096x3072">
     </div>
 
     <div class="btn-group">
-        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik (Zero-Storage)</button>
+        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 12MP</button>
     </div>
 
     <div id="previewContainer" class="preview-box">
-        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris (Bebas Bilah Navigasi):</span><br>
+        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris:</span><br>
         <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
-    <!-- Modul Forensic Spatial Heatmap -->
+    <!-- Modul Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (Forensic Spatial Heatmap)</div>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial 12MP</div>
         
         <div class="controls-row">
             <label>
                 <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
-                <b>Sorot Area Cacat / Coretan Saja (Rekomendasi)</b>
+                <b>Sorot Area Cacat / Coretan Saja</b>
             </label>
             <label>
                 <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
-                Tampilkan Seluruh Grid (Termasuk Hijau)
+                Tampilkan Seluruh Grid 12MP
             </label>
         </div>
 
@@ -99,7 +98,7 @@
         <div id="resultMeta" class="meta-info"></div>
 
         <div class="fingerprint-box">
-            <b>Payload Audit Supabase / API (JSON):</b><br>
+            <b>Payload Audit Supabase (JSON):</b><br>
             <pre id="jsonPayload" class="fingerprint-val" style="margin: 6px 0; white-space: pre-wrap;"></pre>
         </div>
     </div>
@@ -109,7 +108,7 @@
 
 <script>
     const BLOCK_SIZE = 16; 
-    const CAMERA_SCATTER_RATIO = 1.00; // 100% Full Grid Sealing
+    const CAMERA_SCATTER_RATIO = 1.00;
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -172,7 +171,7 @@
         const name = fileInput.files[0].name;
         const match = name.match(/IMG_(\d+)/);
         if (match && !keyInput.value) {
-            keyInput.value = `${match[1]}_2560x1920`;
+            keyInput.value = `${match[1]}_4096x3072`;
         }
     }
 
@@ -214,7 +213,6 @@
                     ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 }
             } else if (blk.type === 'dark_sealed_tampered') {
-                // Area yang seharusnya gelap alami tetapi luma-nya naik (kena coretan / stiker)
                 ctx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
                 ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 ctx.strokeStyle = "#fbbf24";
@@ -235,7 +233,7 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
-    function detectTamperClusters(macroblockMap, targetWidth, targetHeight) {
+    function detectTamperClusters(macroblockMap, targetWidth, targetHeight, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
         const grid = Array.from({length: rows}, () => new Int8Array(cols).fill(-1));
@@ -252,11 +250,13 @@
         let maxLocalDamageCluster = 0;
         let clusterCenter = null;
 
-        for (let r = 0; r < rows - 2; r++) {
-            for (let c = 0; c < cols - 2; c++) {
+        // Pada 12MP (256x192 makroblok), jendela 5x5 (80x80 px) sangat ideal untuk melacak coretan
+        const windowSize = 5;
+        for (let r = 0; r <= rows - windowSize; r++) {
+            for (let c = 0; c <= cols - windowSize; c++) {
                 let zeroMatchesCount = 0;
-                for (let dr = 0; dr < 3; dr++) {
-                    for (let dc = 0; dc < 3; dc++) {
+                for (let dr = 0; dr < windowSize; dr++) {
+                    for (let dc = 0; dc < windowSize; dc++) {
                         if (grid[r + dr][c + dc] === 0) {
                             zeroMatchesCount++;
                         }
@@ -264,15 +264,22 @@
                 }
                 if (zeroMatchesCount > maxLocalDamageCluster) {
                     maxLocalDamageCluster = zeroMatchesCount;
-                    clusterCenter = { x: (c + 1) * BLOCK_SIZE, y: (r + 1) * BLOCK_SIZE };
+                    clusterCenter = { 
+                        x: Math.round((c + windowSize / 2) * BLOCK_SIZE), 
+                        y: Math.round((r + windowSize / 2) * BLOCK_SIZE) 
+                    };
                 }
             }
         }
 
+        // Ambang batas adaptif: Di medsos butuh >= 8 blok berkumpul agar bebas false-positive
+        const threshold = isCompressedChannel ? 8 : 5;
+
         return {
             maxLocalDamageCluster,
             clusterCenter,
-            isLocalTampered: maxLocalDamageCluster >= 3
+            isLocalTampered: maxLocalDamageCluster >= threshold,
+            thresholdUsed: threshold
         };
     }
 
@@ -343,8 +350,6 @@
                 }
 
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
-
-                // Batas keamanan luma sesuai update terbaru pada kamera
                 const isLumaSafe = (avgLuma >= 15.0 && avgLuma <= 240.0);
 
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
@@ -353,7 +358,6 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    // LAPISAN AKTIF (100% GRID)
                     let blockMatches = 0;
 
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
@@ -388,9 +392,7 @@
                     });
 
                 } else {
-                    // PASSIVE DARK & HIGHLIGHT SEAL EVALUATION
                     darkSealedCount++;
-                    // Jika terdeteksi anomali di area yang seharusnya sangat gelap (< 15) tapi melonjak jadi terang
                     if (avgLuma > 30.0 && avgLuma < 240.0) {
                         macroblockMap.push({
                             x: bx,
@@ -476,7 +478,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h} @ Y:${bounds.y})`;
+                    auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
                     activeThreshold = 60.0;
                     activeSourceCanvas = cropCanvas;
                 } else {
@@ -485,17 +487,17 @@
 
                     if (isExactNative) {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
+                        auditMode = `Foto Asli Kamera Murni 12MP (${nativeWidth}x${nativeHeight})`;
                         activeThreshold = 85.0;
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal)`;
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal 12MP)`;
                         activeThreshold = 65.0;
                     }
                     activeSourceCanvas = canvas;
                 }
 
-                // Render Visual Heatmap
+                // Render Heatmap
                 globalMacroblockMap = res.macroblockMap;
 
                 const photoBase = document.getElementById('photoBaseCanvas');
@@ -515,9 +517,12 @@
 
                 resultBox.style.display = 'block';
 
-                const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
-                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight);
+                const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
+                const isCompressedChannel = !isExactNative && !isScreenshot;
+                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight, isCompressedChannel);
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
+
+                const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
 
                 const totalBlk = res.count100 + res.count50 + res.count0;
                 const p100 = totalBlk > 0 ? ((res.count100 / totalBlk) * 100).toFixed(1) : 0;
@@ -526,7 +531,7 @@
 
                 if (!isOriginAuthentic) {
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI TIDAK COCOK (${res.activeMatchRate.toFixed(2)}%)`;
+                    resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI SALAH (${res.activeMatchRate.toFixed(2)}%)`;
                 } else if (isLocalTampered) {
                     resultBox.className = "result-box tampered";
                     resultTitle.innerHTML = `🟡 CORETAN / MANIPULASI MIKRO TERDETEKSI! (${res.count0} blok rusak)`;
@@ -538,11 +543,11 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (100% Full-Surface Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
-                    <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci secara alami<br>
-                    <b>Analisis Kluster Spasial:</b> ${isLocalTampered 
+                    <b>Lapisan Aktif (12MP Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
+                    <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
-                        : '<span style="color: #34d399;">Kerusakan tersebar wajar (Tidak ada coretan lokal)</span>'}<br>
+                        : '<span style="color: #34d399;">Kerusakan menyebar wajar (Bebas manipulasi lokal)</span>'}<br>
 
                     <div class="distribution-box">
                         <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
