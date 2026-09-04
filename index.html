@@ -24,6 +24,10 @@
         .tampered { background-color: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #fbbf24; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.6; }
+        
+        .preview-box { text-align: center; margin-top: 14px; display: none; }
+        .preview-img { max-width: 100%; border-radius: 6px; border: 2px solid #38bdf8; margin-top: 6px; }
+
         .fingerprint-box { background: #020617; border: 1px dashed #38bdf8; border-radius: 6px; padding: 12px; margin-top: 14px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; }
         .fingerprint-val { color: #38bdf8; font-weight: bold; word-break: break-all; }
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
@@ -49,13 +53,18 @@
     </div>
 
     <div class="input-group">
-        <label for="baselinePassive">Baseline Passive Bitstream 65% (Hanya untuk Uji Medsos/Tamper):</label>
-        <textarea id="baselinePassive" placeholder="Kosongkan jika sedang mengekstrak foto asli pertama kali. Isi dengan Base64 resmi untuk menguji foto WA/FB."></textarea>
+        <label for="baselinePassive">Baseline Passive Bitstream 65% (Kunci Audit Mikro Dokumen):</label>
+        <textarea id="baselinePassive" placeholder="Dihasilkan dari langkah 1 (Ekstrak Foto Asli). Tempel di sini saat memverifikasi foto WA atau Screenshot."></textarea>
     </div>
 
     <div class="btn-group">
-        <button class="btn-register" onclick="processEngine('extract_native')">1. Ekstrak Segel Foto Asli (Client-Engine)</button>
-        <button class="btn-verify" onclick="processEngine('verify_audit')">2. Verifikasi Foto Medsos / Audit Tamper</button>
+        <button class="btn-register" onclick="processEngine('extract_native')">1. Ekstrak Segel Foto Asli (Daftarkan)</button>
+        <button class="btn-verify" onclick="processEngine('verify_audit')">2. Verifikasi Foto Medsos / SS / Audit</button>
+    </div>
+
+    <div id="previewContainer" class="preview-box">
+        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Otomatis (Black Bars Dibuang):</span><br>
+        <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
     <div id="resultBox" class="result-box">
@@ -140,6 +149,34 @@
         }
     }
 
+    // Deteksi batas foto kanonikal di dalam screenshot (memotong bilah hitam)
+    function detectExactPhotoBounds(data, width, height, canonicalAspect) {
+        const exactTargetHeight = Math.round(width / canonicalAspect);
+        const rowLumas = new Float64Array(height);
+        for (let y = 0; y < height; y++) {
+            let sum = 0.0;
+            let count = 0;
+            for (let x = 30; x < width - 30; x += 15) {
+                const idx = (y * width + x) * 4;
+                sum += 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+                count++;
+            }
+            rowLumas[y] = count > 0 ? (sum / count) : 0;
+        }
+
+        let topY = -1;
+        for (let y = 50; y < Math.floor(height * 0.65); y++) {
+            if (rowLumas[y - 4] < 12 && rowLumas[y - 2] < 12 && rowLumas[y] >= 15 && rowLumas[y + 4] >= 15) {
+                topY = y;
+                break;
+            }
+        }
+
+        if (topY <= 0) topY = Math.round((height - exactTargetHeight) / 2);
+
+        return { x: 0, y: Math.max(0, topY), w: width, h: exactTargetHeight };
+    }
+
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled, passiveBaselineB64) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
@@ -151,9 +188,13 @@
 
         let passiveExpectedBytes = null;
         if (passiveBaselineB64) {
-            const binStr = atob(passiveBaselineB64);
-            passiveExpectedBytes = new Uint8Array(binStr.length);
-            for (let i = 0; i < binStr.length; i++) passiveExpectedBytes[i] = binStr.charCodeAt(i);
+            try {
+                const binStr = atob(passiveBaselineB64);
+                passiveExpectedBytes = new Uint8Array(binStr.length);
+                for (let i = 0; i < binStr.length; i++) passiveExpectedBytes[i] = binStr.charCodeAt(i);
+            } catch (e) {
+                console.warn("Format Base64 pasif tidak valid");
+            }
         }
 
         const totalMacroblocks = (targetWidth / BLOCK_SIZE) * (targetHeight / BLOCK_SIZE);
@@ -311,9 +352,11 @@
         const resultTitle = document.getElementById('resultTitle');
         const resultMeta = document.getElementById('resultMeta');
         const jsonPayload = document.getElementById('jsonPayload');
+        const previewContainer = document.getElementById('previewContainer');
+        const cropPreview = document.getElementById('cropPreview');
 
         if (!rawKeyInput || !fileInput.files[0]) {
-            alert('Harap pilih file foto dan pastikan Master Key terisi!');
+            alert('Harap pilih berkas foto dan pastikan Master Key terisi!');
             return;
         }
 
@@ -321,36 +364,79 @@
         reader.onload = function(e) {
             const img = new Image();
             img.onload = function() {
-                const w = img.naturalWidth;
-                const h = img.naturalHeight;
+                const nativeWidth = img.naturalWidth;
+                const nativeHeight = img.naturalHeight;
 
                 const canvas = document.getElementById('canvas');
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
-                canvas.width = w;
-                canvas.height = h;
-                ctx.drawImage(img, 0, 0, w, h);
+                canvas.width = nativeWidth;
+                canvas.height = nativeHeight;
+                ctx.drawImage(img, 0, 0, nativeWidth, nativeHeight);
 
                 const parts = rawKeyInput.split('_');
                 const dimParts = parts[parts.length - 1].split('x');
-                const targetW = parseInt(dimParts[0], 10);
-                const targetH = parseInt(dimParts[1], 10);
+                const canonicalWidth = parseInt(dimParts[0], 10);
+                const canonicalHeight = parseInt(dimParts[1], 10);
+                const canonicalAspect = canonicalWidth / canonicalHeight;
+                const screenAspect = nativeWidth / nativeHeight;
 
-                const isExactNative = (w === targetW && h === targetH);
-                const rawData = ctx.getImageData(0, 0, w, h).data;
+                // Cek apakah file merupakan screenshot berdasarkan rasio aspek
+                const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
+                const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
-                const res = runEngineCore(rawData, w, h, targetW, targetH, rawKeyInput, !isExactNative, baselinePassive);
+                let res, auditMode, activeThreshold, passiveThreshold;
+
+                if (isScreenshot) {
+                    const bounds = detectExactPhotoBounds(rawData, nativeWidth, nativeHeight, canonicalAspect);
+
+                    const cropCanvas = document.createElement('canvas');
+                    cropCanvas.width = canonicalWidth;
+                    cropCanvas.height = canonicalHeight;
+                    const cropCtx = cropCanvas.getContext('2d');
+
+                    cropCtx.drawImage(
+                        canvas,
+                        bounds.x, bounds.y, bounds.w, bounds.h,
+                        0, 0, canonicalWidth, canonicalHeight
+                    );
+
+                    previewContainer.style.display = 'block';
+                    cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
+
+                    const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
+                    res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, baselinePassive);
+                    auditMode = `Screenshot Terpotong Otis (${bounds.w}x${bounds.h} &rarr; Kanonikal)`;
+                    activeThreshold = 60.0;
+                    passiveThreshold = 65.0; // Toleransi degradasi screenshot
+                } else {
+                    previewContainer.style.display = 'none';
+                    const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
+
+                    if (isExactNative) {
+                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, baselinePassive);
+                        auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
+                        activeThreshold = 85.0;
+                        passiveThreshold = 95.0; // Foto asli wajib sangat tinggi
+                    } else {
+                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true, baselinePassive);
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal)`;
+                        activeThreshold = 65.0;
+                        passiveThreshold = 68.0; // Toleransi kompresi kuantisasi WA
+                    }
+                }
 
                 resultBox.style.display = 'block';
 
                 if (mode === 'extract_native') {
                     resultBox.className = "result-box valid";
-                    resultTitle.innerHTML = `🟢 EKSTRAKSI SELESAI (Segel Foto Asli Siap Didaftarkan)`;
+                    resultTitle.innerHTML = `🟢 EKSTRAKSI SELESAI (Segel Foto Asli Terkunci)`;
                     document.getElementById('baselinePassive').value = res.generatedPassiveBase64;
 
                     resultMeta.innerHTML = `
                         <b>Master Key:</b> ${rawKeyInput}<br>
-                        <b>Match Rate Aktif (35% PRNG):</b> ${res.activeMatchRate.toFixed(4)}%<br>
-                        <b>Bitstream Pasif (65% Mikro):</b> ${res.generatedPassiveBase64.length} karakter Base64 ter-generate langsung dari piksel!
+                        <b>Audit Mode:</b> ${auditMode}<br>
+                        <b>Kecocokan Aktif (35% PRNG):</b> ${res.matchedActiveBits} / ${res.totalActiveAudited} (${res.activeMatchRate.toFixed(4)}%)<br>
+                        <b>Bitstream Pasif (65%):</b> ${res.generatedPassiveBase64.length} karakter Base64 berhasil diekstrak dari piksel!
                     `;
 
                     const supabasePayload = {
@@ -367,29 +453,48 @@
                     jsonPayload.innerText = JSON.stringify(supabasePayload, null, 2);
 
                 } else {
-                    const isOriginAuthentic = res.activeMatchRate >= 65.0;
+                    const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
                     const hasPassiveAudit = res.totalPassiveAudited > 0;
-                    const isMicroTampered = hasPassiveAudit && res.passiveMatchRate < 90.0;
+                    const isMicroTampered = hasPassiveAudit && (res.passiveMatchRate < passiveThreshold);
 
                     if (!isOriginAuthentic) {
                         resultBox.className = "result-box invalid";
                         resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / PALSU (${res.activeMatchRate.toFixed(2)}%)`;
                     } else if (isMicroTampered) {
                         resultBox.className = "result-box tampered";
-                        resultTitle.innerHTML = `🟡 ASAL RESMI, TAPI DOKUMEN DIEDIT/MANIPULASI (${res.passiveMatchRate.toFixed(2)}% Pasif)`;
+                        resultTitle.innerHTML = `🟡 ASAL RESMI, TAPI TERDETEKSI EDITING DOKUMEN (${res.passiveMatchRate.toFixed(2)}% Pasif, Ambang Batas: ${passiveThreshold}%)`;
                     } else {
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 100% TERVERIFIKASI & ASLI (${res.activeMatchRate.toFixed(2)}%)`;
+                        resultTitle.innerHTML = `🟢 100% TERVERIFIKASI ASLI (${res.activeMatchRate.toFixed(2)}% Aktif)`;
                     }
+
+                    const totalBlk = res.count100 + res.count50 + res.count0;
+                    const p100 = totalBlk > 0 ? ((res.count100 / totalBlk) * 100).toFixed(1) : 0;
+                    const p50 = totalBlk > 0 ? ((res.count50 / totalBlk) * 100).toFixed(1) : 0;
+                    const p0 = totalBlk > 0 ? ((res.count0 / totalBlk) * 100).toFixed(1) : 0;
 
                     resultMeta.innerHTML = `
                         <b>Master Key:</b> ${rawKeyInput}<br>
-                        <b>Lapisan Aktif (35%):</b> ${res.matchedActiveBits} / ${res.totalActiveAudited} bits (${res.activeMatchRate.toFixed(2)}%)<br>
-                        <b>Lapisan Pasif (65%):</b> ${hasPassiveAudit ? `${res.matchedPassiveBits} / ${res.totalPassiveAudited} bits (${res.passiveMatchRate.toFixed(2)}%)` : 'Baseline tidak diisi (Hanya audit makro)'}
+                        <b>Mode Audit:</b> ${auditMode}<br>
+                        <b>Lapisan Aktif (35% Asal Kamera):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                        <b>Lapisan Pasif (65% Integritas Mikro):</b> ${hasPassiveAudit ? `${res.matchedPassiveBits.toLocaleString()} / ${res.totalPassiveAudited.toLocaleString()} bits (${res.passiveMatchRate.toFixed(2)}%)` : '<span style="color:#94a3b8;">Tidak diaudit (Baseline 65% kosong)</span>'}<br>
+
+                        <div class="distribution-box">
+                            <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
+                            <div class="bar-container">
+                                <div class="bar-100" style="width: ${p100}%;" title="100% Match"></div>
+                                <div class="bar-50" style="width: ${p50}%;" title="50% Match"></div>
+                                <div class="bar-0" style="width: ${p0}%;" title="0% Match"></div>
+                            </div>
+                            <span style="color: #34d399;">■ 100% Utuh: ${res.count100} (${p100}%)</span> | 
+                            <span style="color: #fbbf24;">■ 50% Goyang: ${res.count50} (${p50}%)</span> | 
+                            <span style="color: #f87171;">■ 0% Rusak: ${res.count0} (${p0}%)</span>
+                        </div>
                     `;
 
                     jsonPayload.innerText = JSON.stringify({
                         audit_status: isOriginAuthentic && !isMicroTampered ? "VERIFIED" : "TAMPER_DETECTED",
+                        mode: auditMode,
                         active_match: res.activeMatchRate.toFixed(6),
                         passive_match: hasPassiveAudit ? res.passiveMatchRate.toFixed(6) : null
                     }, null, 2);
