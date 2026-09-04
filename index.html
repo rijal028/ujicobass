@@ -199,14 +199,12 @@
         globalMacroblockMap.forEach(blk => {
             if (blk.type === 'active') {
                 if (blk.matches === 0) {
-                    // Rusak / Tampered: Merah Solid + Border Putih
                     ctx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
                     ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                     ctx.strokeStyle = "#ffffff";
                     ctx.lineWidth = 1;
                     ctx.strokeRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 } else if (blk.matches === 1 && currentHeatmapMode === 'full_grid') {
-                    // Utuh: Hijau Transparan
                     ctx.fillStyle = `rgba(16, 185, 129, ${opacity * 0.35})`;
                     ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 }
@@ -216,6 +214,9 @@
                 ctx.strokeStyle = "#fbbf24";
                 ctx.lineWidth = 1.5;
                 ctx.strokeRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
+            } else if (blk.type === 'skipped' && currentHeatmapMode === 'full_grid') {
+                ctx.fillStyle = `rgba(100, 116, 139, ${opacity * 0.25})`;
+                ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
             }
         });
     }
@@ -300,7 +301,6 @@
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
-                // HANYA 1 BIT
                 const expectedBit = rng() > 0.5 ? 1 : 0;
 
                 let blockSumLuma = 0.0;
@@ -358,7 +358,6 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    // EVALUASI 1-BIT EMAS (2,1) vs (1,2)
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                     const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const diff1 = c1 - c2;
@@ -383,14 +382,24 @@
 
                 } else {
                     darkSealedCount++;
-                    if (avgLuma > 30.0 && avgLuma < 240.0) {
+                    // Evaluasi tamper pasif hanya pada foto asli; di medsos diperlakukan sebagai netral
+                    if (!isDownscaled) {
+                        if (avgLuma > 35.0 && avgLuma < 235.0) {
+                            macroblockMap.push({
+                                x: bx,
+                                y: by,
+                                type: 'dark_sealed_tampered',
+                                matches: 0
+                            });
+                            count0++;
+                        }
+                    } else {
                         macroblockMap.push({
                             x: bx,
                             y: by,
-                            type: 'dark_sealed_tampered',
-                            matches: 0
+                            type: 'skipped',
+                            matches: -1
                         });
-                        count0++;
                     }
                 }
             }
