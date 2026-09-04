@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Full-Surface Forensic Engine</title>
+    <title>SecurePixel 1-Bit Forensic Engine</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -38,14 +38,13 @@
         .distribution-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; margin-top: 10px; font-family: monospace; font-size: 0.8rem; }
         .bar-container { display: flex; height: 12px; border-radius: 3px; overflow: hidden; margin: 6px 0; }
         .bar-100 { background: #10b981; }
-        .bar-50 { background: #f59e0b; }
         .bar-0 { background: #ef4444; }
     </style>
 </head>
 <body>
 
 <div class="card">
-    <h1>SecurePixel Full-Surface Forensic Engine</h1>
+    <h1>SecurePixel 1-Bit Full-Surface Forensic Engine</h1>
 
     <div class="input-group">
         <label for="imageInput">Pilih Berkas Citra (Asli Kamera / Medsos / Screenshot):</label>
@@ -58,7 +57,7 @@
     </div>
 
     <div class="btn-group">
-        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik</button>
+        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 1-Bit</button>
     </div>
 
     <div id="previewContainer" class="preview-box">
@@ -68,7 +67,7 @@
 
     <!-- Modul Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (Forensic Heatmap)</div>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
         
         <div class="controls-row">
             <label>
@@ -77,7 +76,7 @@
             </label>
             <label>
                 <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
-                Tampilkan Seluruh Grid
+                Tampilkan Seluruh Grid (Termasuk Hijau)
             </label>
         </div>
 
@@ -200,15 +199,14 @@
         globalMacroblockMap.forEach(blk => {
             if (blk.type === 'active') {
                 if (blk.matches === 0) {
+                    // Rusak / Tampered: Merah Solid + Border Putih
                     ctx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
                     ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                     ctx.strokeStyle = "#ffffff";
                     ctx.lineWidth = 1;
                     ctx.strokeRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
-                } else if (blk.matches === 1) {
-                    ctx.fillStyle = `rgba(245, 158, 11, ${opacity * 0.75})`;
-                    ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
-                } else if (blk.matches === 2 && currentHeatmapMode === 'full_grid') {
+                } else if (blk.matches === 1 && currentHeatmapMode === 'full_grid') {
+                    // Utuh: Hijau Transparan
                     ctx.fillStyle = `rgba(16, 185, 129, ${opacity * 0.35})`;
                     ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 }
@@ -288,7 +286,7 @@
         let totalActiveAudited = 0;
         let matchedActiveBits = 0;
         let totalGapEnergy = 0.0;
-        let count100 = 0, count50 = 0, count0 = 0;
+        let count100 = 0, count0 = 0;
         let darkSealedCount = 0;
 
         const macroblockMap = [];
@@ -302,8 +300,8 @@
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
-                const expectedBit1 = rng() > 0.5 ? 1 : 0;
-                const expectedBit2 = rng() > 0.5 ? 1 : 0;
+                // HANYA 1 BIT
+                const expectedBit = rng() > 0.5 ? 1 : 0;
 
                 let blockSumLuma = 0.0;
 
@@ -318,7 +316,6 @@
                         }
                     }
                 } else {
-                    // INTERPOLASI BILINEAR SUB-PIXEL (Presisi tinggi tanpa phase-shift)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
                         const srcY = (by + y + 0.5) * scaleY - 0.5;
                         const y0 = Math.max(0, Math.min(height - 1, Math.floor(srcY)));
@@ -361,37 +358,27 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    let blockMatches = 0;
-
+                    // EVALUASI 1-BIT EMAS (2,1) vs (1,2)
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                     const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const diff1 = c1 - c2;
-                    if ((diff1 > 0 ? 1 : 0) === expectedBit1) {
+                    const matched = ((diff1 > 0 ? 1 : 0) === expectedBit);
+
+                    if (matched) {
                         matchedActiveBits++;
-                        blockMatches++;
+                        count100++;
+                    } else {
+                        count0++;
                     }
+
                     totalGapEnergy += Math.abs(diff1);
                     totalActiveAudited++;
-
-                    const c3 = dctCoefficients[3 * BLOCK_SIZE + 1];
-                    const c4 = dctCoefficients[1 * BLOCK_SIZE + 3];
-                    const diff2 = c3 - c4;
-                    if ((diff2 > 0 ? 1 : 0) === expectedBit2) {
-                        matchedActiveBits++;
-                        blockMatches++;
-                    }
-                    totalGapEnergy += Math.abs(diff2);
-                    totalActiveAudited++;
-
-                    if (blockMatches === 2) count100++;
-                    else if (blockMatches === 1) count50++;
-                    else count0++;
 
                     macroblockMap.push({
                         x: bx,
                         y: by,
                         type: 'active',
-                        matches: blockMatches
+                        matches: matched ? 1 : 0
                     });
 
                 } else {
@@ -414,7 +401,7 @@
             matchedActiveBits,
             totalActiveAudited,
             totalGapEnergy,
-            count100, count50, count0,
+            count100, count0,
             darkSealedCount,
             macroblockMap
         };
@@ -500,7 +487,6 @@
                     activeSourceCanvas = canvas;
                 }
 
-                // Render Heatmap
                 globalMacroblockMap = res.macroblockMap;
 
                 const photoBase = document.getElementById('photoBaseCanvas');
@@ -527,9 +513,8 @@
 
                 const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
 
-                const totalBlk = res.count100 + res.count50 + res.count0;
+                const totalBlk = res.count100 + res.count0;
                 const p100 = totalBlk > 0 ? ((res.count100 / totalBlk) * 100).toFixed(1) : 0;
-                const p50 = totalBlk > 0 ? ((res.count50 / totalBlk) * 100).toFixed(1) : 0;
                 const p0 = totalBlk > 0 ? ((res.count0 / totalBlk) * 100).toFixed(1) : 0;
 
                 if (!isOriginAuthentic) {
@@ -546,7 +531,7 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (Full Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
@@ -555,13 +540,11 @@
                     <div class="distribution-box">
                         <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
                         <div class="bar-container">
-                            <div class="bar-100" style="width: ${p100}%;" title="100% Match"></div>
-                            <div class="bar-50" style="width: ${p50}%;" title="50% Match"></div>
-                            <div class="bar-0" style="width: ${p0}%;" title="0% Match"></div>
+                            <div class="bar-100" style="width: ${p100}%;" title="100% Utuh"></div>
+                            <div class="bar-0" style="width: ${p0}%;" title="0% Rusak"></div>
                         </div>
-                        <span style="color: #34d399;">■ 100% Utuh: ${res.count100} (${p100}%)</span> | 
-                        <span style="color: #fbbf24;">■ 50% Goyang: ${res.count50} (${p50}%)</span> | 
-                        <span style="color: #f87171; font-weight: bold;">■ 0% Rusak (Tamper): ${res.count0} (${p0}%)</span>
+                        <span style="color: #34d399;">■ Utuh: ${res.count100} (${p100}%)</span> | 
+                        <span style="color: #f87171; font-weight: bold;">■ Rusak (Tamper): ${res.count0} (${p0}%)</span>
                     </div>
                 `;
 
