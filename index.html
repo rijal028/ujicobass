@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 12MP UHD Forensic Engine</title>
+    <title>SecurePixel Full-Surface Forensic Engine</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -45,20 +45,20 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel 12MP UHD Forensic Engine</h1>
+    <h1>SecurePixel Full-Surface Forensic Engine</h1>
 
     <div class="input-group">
-        <label for="imageInput">Pilih Berkas Citra (Asli 12MP / Medsos / Screenshot):</label>
+        <label for="imageInput">Pilih Berkas Citra (Asli Kamera / Medsos / Screenshot):</label>
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
     </div>
 
     <div class="input-group">
         <label for="keyInput">Master Key (Terdeteksi otomatis dari nama berkas):</label>
-        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_4096x3072">
+        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_3200x2400">
     </div>
 
     <div class="btn-group">
-        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 12MP</button>
+        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik</button>
     </div>
 
     <div id="previewContainer" class="preview-box">
@@ -68,16 +68,16 @@
 
     <!-- Modul Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial 12MP</div>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (Forensic Heatmap)</div>
         
         <div class="controls-row">
             <label>
                 <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
-                <b>Sorot Area Cacat / Coretan Saja</b>
+                <b>Sorot Area Cacat / Coretan Saja (Rekomendasi)</b>
             </label>
             <label>
                 <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
-                Tampilkan Seluruh Grid 12MP
+                Tampilkan Seluruh Grid
             </label>
         </div>
 
@@ -169,9 +169,11 @@
         if (!fileInput.files[0]) return;
 
         const name = fileInput.files[0].name;
+        // Deteksi timestamp IMG_[timestamp]
         const match = name.match(/IMG_(\d+)/);
         if (match && !keyInput.value) {
-            keyInput.value = `${match[1]}_4096x3072`;
+            // Default gunakan profil kanonikal harmonis 3200x2400
+            keyInput.value = `${match[1]}_3200x2400`;
         }
     }
 
@@ -250,8 +252,8 @@
         let maxLocalDamageCluster = 0;
         let clusterCenter = null;
 
-        // Pada 12MP (256x192 makroblok), jendela 5x5 (80x80 px) sangat ideal untuk melacak coretan
-        const windowSize = 5;
+        // Jendela 4x4 makroblok (64x64 piksel) proporsional melacak garis coretan
+        const windowSize = 4;
         for (let r = 0; r <= rows - windowSize; r++) {
             for (let c = 0; c <= cols - windowSize; c++) {
                 let zeroMatchesCount = 0;
@@ -272,8 +274,8 @@
             }
         }
 
-        // Ambang batas adaptif: Di medsos butuh >= 8 blok berkumpul agar bebas false-positive
-        const threshold = isCompressedChannel ? 8 : 5;
+        // Ambang batas: Di medsos butuh >= 7 blok berkumpul agar bebas false-positive
+        const threshold = isCompressedChannel ? 7 : 4;
 
         return {
             maxLocalDamageCluster,
@@ -487,11 +489,11 @@
 
                     if (isExactNative) {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        auditMode = `Foto Asli Kamera Murni 12MP (${nativeWidth}x${nativeHeight})`;
+                        auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                         activeThreshold = 85.0;
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal 12MP)`;
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
                         activeThreshold = 65.0;
                     }
                     activeSourceCanvas = canvas;
@@ -543,7 +545,7 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (12MP Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (Full Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
