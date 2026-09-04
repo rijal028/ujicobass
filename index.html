@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel Dual-Layer Forensic Engine (50% Scatter)</title>
+    <title>SecurePixel 100% Full-Surface Forensic Engine</title>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
@@ -11,17 +11,14 @@
         h1 { font-size: 1.3rem; margin-top: 0; color: #38bdf8; text-align: center; }
         .input-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
-        input[type="text"], input[type="file"], textarea { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; }
-        textarea { font-family: monospace; font-size: 0.75rem; height: 70px; resize: vertical; }
-        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; }
+        .btn-group { display: flex; gap: 10px; margin-top: 14px; }
         button { flex: 1; padding: 12px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .btn-register { background-color: #10b981; }
-        .btn-register:hover { background-color: #059669; }
         .btn-verify { background-color: #0284c7; }
         .btn-verify:hover { background-color: #0369a1; }
         .result-box { margin-top: 20px; padding: 16px; border-radius: 8px; display: none; }
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
-        .tampered { background-color: rgba(245, 158, 11, 0.15); border: 1px solid #f59e0b; color: #fbbf24; }
+        .tampered { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .invalid { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
         .meta-info { font-size: 0.85rem; color: #94a3b8; margin-top: 8px; line-height: 1.6; }
         
@@ -33,8 +30,9 @@
         .heatmap-canvas-container { position: relative; display: inline-block; max-width: 100%; border-radius: 6px; overflow: hidden; border: 1px solid #475569; }
         .heatmap-canvas-container canvas { display: block; max-width: 100%; height: auto; }
         #heatmapOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        .slider-group { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 10px; font-size: 0.8rem; color: #94a3b8; }
-        .slider-group input[type="range"] { width: 180px; }
+        
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; margin-top: 12px; font-size: 0.82rem; color: #94a3b8; }
+        .controls-row label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: #f1f5f9; cursor: pointer; }
 
         .fingerprint-box { background: #020617; border: 1px dashed #38bdf8; border-radius: 6px; padding: 12px; margin-top: 14px; font-family: monospace; font-size: 0.85rem; color: #e2e8f0; }
         .fingerprint-val { color: #38bdf8; font-weight: bold; word-break: break-all; }
@@ -48,52 +46,51 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel Dual-Layer Forensic Engine (50% Scatter)</h1>
+    <h1>SecurePixel Forensic Engine (100% Full-Surface Grid)</h1>
 
     <div class="input-group">
-        <label for="imageInput">Pilih Berkas Foto (Foto Asli Kamera / Medsos / Screenshot):</label>
+        <label for="imageInput">Pilih Berkas Citra (Foto Asli Kamera / Medsos / Screenshot):</label>
         <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
     </div>
 
     <div class="input-group">
-        <label for="keyInput">Master Key (Otomatis dari nama file atau isi manual):</label>
-        <input type="text" id="keyInput" placeholder="Contoh: 1788254684998_2560x1920">
-    </div>
-
-    <div class="input-group">
-        <label for="baselinePassive">Baseline Passive Bitstream (Kunci Audit Dokumen Asli):</label>
-        <textarea id="baselinePassive" placeholder="Dihasilkan dari Langkah 1 (Foto Asli Kanonikal). Digunakan untuk mendeteksi edit mikro tulisan/angka pada foto asli."></textarea>
+        <label for="keyInput">Master Key (Otomatis terdeteksi dari nama berkas atau isi manual):</label>
+        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_2560x1920">
     </div>
 
     <div class="btn-group">
-        <button class="btn-register" onclick="processEngine('extract_native')">1. Ekstrak Segel Foto Asli (Hanya Kanonikal)</button>
-        <button class="btn-verify" onclick="processEngine('verify_audit')">2. Verifikasi Foto (Medsos / SS / Audit)</button>
+        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik (Zero-Storage)</button>
     </div>
 
     <div id="previewContainer" class="preview-box">
-        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris (Bebas Bar Navigasi):</span><br>
+        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris (Bebas Bilah Navigasi):</span><br>
         <img id="cropPreview" class="preview-img" alt="Cropped preview">
     </div>
 
     <!-- Modul Forensic Spatial Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.9rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (Forensic Heatmap)</div>
-        <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 8px;">
-            <span style="color: #34d399;">■ Hijau: Utuh (2 bit)</span> | 
-            <span style="color: #fbbf24;">■ Kuning: Goyang (1 bit)</span> | 
-            <span style="color: #f87171;">■ Merah: Rusak / Edit (0 bit)</span> | 
-            <span style="color: #64748b;">■ Gelap: Pasif / Filtered</span>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (Forensic Spatial Heatmap)</div>
+        
+        <div class="controls-row">
+            <label>
+                <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
+                <b>Sorot Area Cacat / Coretan Saja (Rekomendasi)</b>
+            </label>
+            <label>
+                <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
+                Tampilkan Seluruh Grid (Termasuk Hijau)
+            </label>
         </div>
 
-        <div class="heatmap-canvas-container">
+        <div class="heatmap-canvas-container" style="margin-top: 10px;">
             <canvas id="photoBaseCanvas"></canvas>
             <canvas id="heatmapOverlay"></canvas>
         </div>
 
-        <div class="slider-group">
-            <span>Transparansi Overlay:</span>
-            <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="0.55" oninput="updateHeatmapOpacity(this.value)">
-            <span id="opacityVal">55%</span>
+        <div class="controls-row">
+            <span>Transparansi Kerusakan:</span>
+            <input type="range" id="opacitySlider" min="0.2" max="1" step="0.05" value="0.85" oninput="updateHeatmapOpacity(this.value)">
+            <span id="opacityVal">85%</span>
         </div>
     </div>
 
@@ -102,7 +99,7 @@
         <div id="resultMeta" class="meta-info"></div>
 
         <div class="fingerprint-box">
-            <b>Payload Supabase Database (JSON):</b><br>
+            <b>Payload Audit Supabase / API (JSON):</b><br>
             <pre id="jsonPayload" class="fingerprint-val" style="margin: 6px 0; white-space: pre-wrap;"></pre>
         </div>
     </div>
@@ -112,7 +109,7 @@
 
 <script>
     const BLOCK_SIZE = 16; 
-    const CAMERA_SCATTER_RATIO = 1.00;
+    const CAMERA_SCATTER_RATIO = 1.00; // 100% Full Grid Sealing
 
     const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
     const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
@@ -192,8 +189,7 @@
     }
 
     let globalMacroblockMap = [];
-    let globalCanvasWidth = 2560;
-    let globalCanvasHeight = 1920;
+    let currentHeatmapMode = 'defects_only';
 
     function renderHeatmapLayer(opacity) {
         const overlay = document.getElementById('heatmapOverlay');
@@ -204,20 +200,34 @@
 
         globalMacroblockMap.forEach(blk => {
             if (blk.type === 'active') {
-                if (blk.matches === 2) {
-                    ctx.fillStyle = `rgba(16, 185, 129, ${opacity * 0.85})`; // Hijau
+                if (blk.matches === 0) {
+                    ctx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
+                    ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
+                    ctx.strokeStyle = "#ffffff";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 } else if (blk.matches === 1) {
-                    ctx.fillStyle = `rgba(245, 158, 11, ${opacity * 0.95})`; // Kuning
-                } else {
-                    ctx.fillStyle = `rgba(239, 68, 68, ${opacity * 1.0})`;   // Merah
+                    ctx.fillStyle = `rgba(245, 158, 11, ${opacity * 0.75})`;
+                    ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
+                } else if (blk.matches === 2 && currentHeatmapMode === 'full_grid') {
+                    ctx.fillStyle = `rgba(16, 185, 129, ${opacity * 0.35})`;
+                    ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
                 }
+            } else if (blk.type === 'dark_sealed_tampered') {
+                // Area yang seharusnya gelap alami tetapi luma-nya naik (kena coretan / stiker)
+                ctx.fillStyle = `rgba(239, 68, 68, ${opacity})`;
                 ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
-            } else if (blk.type === 'skipped') {
-                // Blok difilter (ekstrem kontras / terlalu gelap/terang)
-                ctx.fillStyle = `rgba(100, 116, 139, ${opacity * 0.35})`;
-                ctx.fillRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
+                ctx.strokeStyle = "#fbbf24";
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(blk.x, blk.y, BLOCK_SIZE, BLOCK_SIZE);
             }
         });
+    }
+
+    function switchHeatmapMode(mode) {
+        currentHeatmapMode = mode;
+        const opacity = parseFloat(document.getElementById('opacitySlider').value);
+        renderHeatmapLayer(opacity);
     }
 
     function updateHeatmapOpacity(val) {
@@ -225,7 +235,48 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
-    function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled, passiveBaselineB64) {
+    function detectTamperClusters(macroblockMap, targetWidth, targetHeight) {
+        const cols = targetWidth / BLOCK_SIZE;
+        const rows = targetHeight / BLOCK_SIZE;
+        const grid = Array.from({length: rows}, () => new Int8Array(cols).fill(-1));
+
+        macroblockMap.forEach(blk => {
+            const c = Math.floor(blk.x / BLOCK_SIZE);
+            const r = Math.floor(blk.y / BLOCK_SIZE);
+            if (r < rows && c < cols) {
+                if (blk.type === 'active') grid[r][c] = blk.matches;
+                else if (blk.type === 'dark_sealed_tampered') grid[r][c] = 0;
+            }
+        });
+
+        let maxLocalDamageCluster = 0;
+        let clusterCenter = null;
+
+        for (let r = 0; r < rows - 2; r++) {
+            for (let c = 0; c < cols - 2; c++) {
+                let zeroMatchesCount = 0;
+                for (let dr = 0; dr < 3; dr++) {
+                    for (let dc = 0; dc < 3; dc++) {
+                        if (grid[r + dr][c + dc] === 0) {
+                            zeroMatchesCount++;
+                        }
+                    }
+                }
+                if (zeroMatchesCount > maxLocalDamageCluster) {
+                    maxLocalDamageCluster = zeroMatchesCount;
+                    clusterCenter = { x: (c + 1) * BLOCK_SIZE, y: (r + 1) * BLOCK_SIZE };
+                }
+            }
+        }
+
+        return {
+            maxLocalDamageCluster,
+            clusterCenter,
+            isLocalTampered: maxLocalDamageCluster >= 3
+        };
+    }
+
+    function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
 
@@ -233,27 +284,9 @@
         let matchedActiveBits = 0;
         let totalGapEnergy = 0.0;
         let count100 = 0, count50 = 0, count0 = 0;
+        let darkSealedCount = 0;
 
         const macroblockMap = [];
-
-        let passiveExpectedBytes = null;
-        if (passiveBaselineB64) {
-            try {
-                const binStr = atob(passiveBaselineB64);
-                passiveExpectedBytes = new Uint8Array(binStr.length);
-                for (let i = 0; i < binStr.length; i++) passiveExpectedBytes[i] = binStr.charCodeAt(i);
-            } catch (e) {
-                console.warn("Format Base64 pasif tidak valid");
-            }
-        }
-
-        const totalMacroblocks = (targetWidth / BLOCK_SIZE) * (targetHeight / BLOCK_SIZE);
-        const extractedPassiveBytes = new Uint8Array(Math.ceil(totalMacroblocks / 8));
-        let bitPointer = 0;
-
-        let totalPassiveAudited = 0;
-        let matchedPassiveBits = 0;
-
         const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
@@ -310,22 +343,17 @@
                 }
 
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
-                let varianceSum = 0.0;
-                for (let i = 0; i < totalPixelsPerBlock; i++) {
-                    const diff = blockLuma[i] - avgLuma;
-                    varianceSum += diff * diff;
-                }
-                const variance = varianceSum / totalPixelsPerBlock;
 
-                const isVisualSafe = (avgLuma >= 25.0 && avgLuma <= 230.0) && (variance <= 1800.0);
+                // Batas keamanan luma sesuai update terbaru pada kamera
+                const isLumaSafe = (avgLuma >= 15.0 && avgLuma <= 240.0);
 
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     blockLuma[i] -= 128.0;
                 }
                 fastForwardDCT(blockLuma, dctCoefficients);
 
-                if (isSelected && isVisualSafe) {
-                    // LAPISAN 1: AKTIF (50%)
+                if (isSelected && isLumaSafe) {
+                    // LAPISAN AKTIF (100% GRID)
                     let blockMatches = 0;
 
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
@@ -360,38 +388,21 @@
                     });
 
                 } else {
-                    // LAPISAN 2: PASIF ATAU BLOK TERFILTER
-                    if (!isVisualSafe && isSelected) {
-                        macroblockMap.push({ x: bx, y: by, type: 'skipped', matches: -1 });
+                    // PASSIVE DARK & HIGHLIGHT SEAL EVALUATION
+                    darkSealedCount++;
+                    // Jika terdeteksi anomali di area yang seharusnya sangat gelap (< 15) tapi melonjak jadi terang
+                    if (avgLuma > 30.0 && avgLuma < 240.0) {
+                        macroblockMap.push({
+                            x: bx,
+                            y: by,
+                            type: 'dark_sealed_tampered',
+                            matches: 0
+                        });
+                        count0++;
                     }
-
-                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
-                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
-                    const naturalBit = c1 > c2 ? 1 : 0;
-
-                    const byteIdx = Math.floor(bitPointer / 8);
-                    const bitOffset = 7 - (bitPointer % 8);
-
-                    if (naturalBit === 1) {
-                        extractedPassiveBytes[byteIdx] |= (1 << bitOffset);
-                    }
-
-                    if (passiveExpectedBytes && byteIdx < passiveExpectedBytes.length) {
-                        const expBit = (passiveExpectedBytes[byteIdx] >> bitOffset) & 1;
-                        if (naturalBit === expBit) matchedPassiveBits++;
-                        totalPassiveAudited++;
-                    }
-
-                    bitPointer++;
                 }
             }
         }
-
-        const exactByteLength = Math.ceil(bitPointer / 8);
-        const trimmed = extractedPassiveBytes.slice(0, exactByteLength);
-        let binaryStr = "";
-        for (let i = 0; i < trimmed.length; i++) binaryStr += String.fromCharCode(trimmed[i]);
-        const generatedPassiveBase64 = btoa(binaryStr);
 
         return {
             activeMatchRate: totalActiveAudited > 0 ? (matchedActiveBits / totalActiveAudited) * 100 : 0,
@@ -399,18 +410,14 @@
             totalActiveAudited,
             totalGapEnergy,
             count100, count50, count0,
-            generatedPassiveBase64,
-            totalPassiveAudited,
-            matchedPassiveBits,
-            passiveMatchRate: totalPassiveAudited > 0 ? (matchedPassiveBits / totalPassiveAudited) * 100 : 0,
+            darkSealedCount,
             macroblockMap
         };
     }
 
-    function processEngine(mode) {
+    function processEngine() {
         const rawKeyInput = document.getElementById('keyInput').value.trim();
         const fileInput = document.getElementById('imageInput');
-        const baselinePassive = document.getElementById('baselinePassive').value.trim();
         const resultBox = document.getElementById('resultBox');
         const resultTitle = document.getElementById('resultTitle');
         const resultMeta = document.getElementById('resultMeta');
@@ -420,7 +427,7 @@
         const heatmapContainer = document.getElementById('heatmapContainer');
 
         if (!rawKeyInput || !fileInput.files[0]) {
-            alert('Pilih berkas foto dan pastikan Master Key terisi!');
+            alert('Pilih berkas citra dan pastikan Master Key terisi!');
             return;
         }
 
@@ -437,13 +444,6 @@
                 const canonicalHeight = parseInt(dimParts[1], 10);
                 const canonicalAspect = canonicalWidth / canonicalHeight;
                 const screenAspect = nativeWidth / nativeHeight;
-
-                const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
-
-                if (mode === 'extract_native' && !isExactNative) {
-                    alert(`PENDAFTARAN DITOLAK: Berkas ini beresolusi ${nativeWidth}x${nativeHeight} (Bukan Foto Asli ${canonicalWidth}x${canonicalHeight}).\nHanya foto kanonikal asli dari kamera yang berhak mendaftarkan segel!`);
-                    return;
-                }
 
                 const canvas = document.getElementById('canvas');
                 const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -475,19 +475,20 @@
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, baselinePassive);
+                    res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                     auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h} @ Y:${bounds.y})`;
                     activeThreshold = 60.0;
                     activeSourceCanvas = cropCanvas;
                 } else {
                     previewContainer.style.display = 'none';
+                    const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
 
                     if (isExactNative) {
-                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false, baselinePassive);
+                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                         activeThreshold = 85.0;
                     } else {
-                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true, baselinePassive);
+                        res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal)`;
                         activeThreshold = 65.0;
                     }
@@ -496,8 +497,6 @@
 
                 // Render Visual Heatmap
                 globalMacroblockMap = res.macroblockMap;
-                globalCanvasWidth = canonicalWidth;
-                globalCanvasHeight = canonicalHeight;
 
                 const photoBase = document.getElementById('photoBaseCanvas');
                 const overlay = document.getElementById('heatmapOverlay');
@@ -516,95 +515,56 @@
 
                 resultBox.style.display = 'block';
 
-                if (mode === 'extract_native') {
-                    if (res.activeMatchRate < 95.0) {
-                        resultBox.className = "result-box invalid";
-                        resultTitle.innerHTML = `🔴 GAGAL: FOTO TIDAK MEMILIKI WATERMARK ASLI (${res.activeMatchRate.toFixed(2)}%)`;
-                        return;
-                    }
+                const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
+                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight);
+                const isLocalTampered = clusterAnalysis.isLocalTampered;
 
-                    resultBox.className = "result-box valid";
-                    resultTitle.innerHTML = `🟢 PENDAFTARAN RESMI SUKSES (Segel Asli Terkunci)`;
-                    document.getElementById('baselinePassive').value = res.generatedPassiveBase64;
+                const totalBlk = res.count100 + res.count50 + res.count0;
+                const p100 = totalBlk > 0 ? ((res.count100 / totalBlk) * 100).toFixed(1) : 0;
+                const p50 = totalBlk > 0 ? ((res.count50 / totalBlk) * 100).toFixed(1) : 0;
+                const p0 = totalBlk > 0 ? ((res.count0 / totalBlk) * 100).toFixed(1) : 0;
 
-                    resultMeta.innerHTML = `
-                        <b>Master Key:</b> ${rawKeyInput}<br>
-                        <b>Kecocokan Asal (Lapisan Aktif 50%):</b> ${res.activeMatchRate.toFixed(4)}% (Lolos Segel)<br>
-                        <b>Bitstream Pasif (50% Sisa):</b> ${res.generatedPassiveBase64.length} karakter Base64 terkunci di database.
-                    `;
-
-                    const supabasePayload = {
-                        master_seed: parts[0],
-                        master_key: rawKeyInput,
-                        channel_fingerprints: {
-                            native: {
-                                active_match_rate: res.activeMatchRate.toFixed(12),
-                                passive_bitstream: res.generatedPassiveBase64,
-                                total_gap_energy: res.totalGapEnergy.toFixed(6)
-                            }
-                        }
-                    };
-                    jsonPayload.innerText = JSON.stringify(supabasePayload, null, 2);
-
+                if (!isOriginAuthentic) {
+                    resultBox.className = "result-box invalid";
+                    resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI TIDAK COCOK (${res.activeMatchRate.toFixed(2)}%)`;
+                } else if (isLocalTampered) {
+                    resultBox.className = "result-box tampered";
+                    resultTitle.innerHTML = `🟡 CORETAN / MANIPULASI MIKRO TERDETEKSI! (${res.count0} blok rusak)`;
                 } else {
-                    const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
-                    const hasPassiveAudit = res.totalPassiveAudited > 0;
-                    
-                    const evaluatePassive = isExactNative && hasPassiveAudit;
-                    const isMicroTampered = evaluatePassive && (res.passiveMatchRate < 92.0);
-
-                    if (!isOriginAuthentic) {
-                        resultBox.className = "result-box invalid";
-                        resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI TIDAK COCOK (${res.activeMatchRate.toFixed(2)}%)`;
-                    } else if (isMicroTampered) {
-                        resultBox.className = "result-box tampered";
-                        resultTitle.innerHTML = `🟡 ASAL RESMI, TAPI DOKUMEN ASLI DIEDIT/MANIPULASI (${res.passiveMatchRate.toFixed(2)}% Pasif Match)`;
-                    } else {
-                        resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (${res.activeMatchRate.toFixed(2)}% Aktif)`;
-                    }
-
-                    const totalBlk = res.count100 + res.count50 + res.count0;
-                    const p100 = totalBlk > 0 ? ((res.count100 / totalBlk) * 100).toFixed(1) : 0;
-                    const p50 = totalBlk > 0 ? ((res.count50 / totalBlk) * 100).toFixed(1) : 0;
-                    const p0 = totalBlk > 0 ? ((res.count0 / totalBlk) * 100).toFixed(1) : 0;
-
-                    let passiveInfoText = '';
-                    if (isExactNative) {
-                        passiveInfoText = hasPassiveAudit 
-                            ? `${res.matchedPassiveBits.toLocaleString()} / ${res.totalPassiveAudited.toLocaleString()} bits (${res.passiveMatchRate.toFixed(2)}%)`
-                            : '<span style="color:#94a3b8;">Tidak diaudit (Baseline kosong)</span>';
-                    } else {
-                        passiveInfoText = '<span style="color:#38bdf8;">Dilewati (Kuantisasi kompresi mengacak bit mikro alami)</span>';
-                    }
-
-                    resultMeta.innerHTML = `
-                        <b>Master Key:</b> ${rawKeyInput}<br>
-                        <b>Mode Audit:</b> ${auditMode}<br>
-                        <b>Lapisan Aktif (50% Asal Kamera):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
-                        <b>Lapisan Pasif (50% Integritas Mikro):</b> ${passiveInfoText}<br>
-
-                        <div class="distribution-box">
-                            <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
-                            <div class="bar-container">
-                                <div class="bar-100" style="width: ${p100}%;" title="100% Match"></div>
-                                <div class="bar-50" style="width: ${p50}%;" title="50% Match"></div>
-                                <div class="bar-0" style="width: ${p0}%;" title="0% Match"></div>
-                            </div>
-                            <span style="color: #34d399;">■ 100% Utuh: ${res.count100} (${p100}%)</span> | 
-                            <span style="color: #fbbf24;">■ 50% Goyang: ${res.count50} (${p50}%)</span> | 
-                            <span style="color: #f87171;">■ 0% Rusak: ${res.count0} (${p0}%)</span>
-                        </div>
-                    `;
-
-                    jsonPayload.innerText = JSON.stringify({
-                        audit_status: isOriginAuthentic && !isMicroTampered ? "VERIFIED" : "FAILED",
-                        mode: auditMode,
-                        active_match: res.activeMatchRate.toFixed(6),
-                        passive_evaluated: evaluatePassive,
-                        passive_match: evaluatePassive ? res.passiveMatchRate.toFixed(6) : null
-                    }, null, 2);
+                    resultBox.className = "result-box valid";
+                    resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (${res.activeMatchRate.toFixed(2)}% Aktif)`;
                 }
+
+                resultMeta.innerHTML = `
+                    <b>Master Key:</b> ${rawKeyInput}<br>
+                    <b>Mode Audit:</b> ${auditMode}<br>
+                    <b>Lapisan Aktif (100% Full-Surface Grid):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} bits (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci secara alami<br>
+                    <b>Analisis Kluster Spasial:</b> ${isLocalTampered 
+                        ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
+                        : '<span style="color: #34d399;">Kerusakan tersebar wajar (Tidak ada coretan lokal)</span>'}<br>
+
+                    <div class="distribution-box">
+                        <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
+                        <div class="bar-container">
+                            <div class="bar-100" style="width: ${p100}%;" title="100% Match"></div>
+                            <div class="bar-50" style="width: ${p50}%;" title="50% Match"></div>
+                            <div class="bar-0" style="width: ${p0}%;" title="0% Match"></div>
+                        </div>
+                        <span style="color: #34d399;">■ 100% Utuh: ${res.count100} (${p100}%)</span> | 
+                        <span style="color: #fbbf24;">■ 50% Goyang: ${res.count50} (${p50}%)</span> | 
+                        <span style="color: #f87171; font-weight: bold;">■ 0% Rusak (Tamper): ${res.count0} (${p0}%)</span>
+                    </div>
+                `;
+
+                jsonPayload.innerText = JSON.stringify({
+                    audit_status: isOriginAuthentic && !isLocalTampered ? "VERIFIED" : "TAMPER_DETECTED",
+                    mode: auditMode,
+                    active_match: res.activeMatchRate.toFixed(6),
+                    tamper_cluster_detected: isLocalTampered,
+                    cluster_damage_peak: clusterAnalysis.maxLocalDamageCluster,
+                    tamper_blocks_count: res.count0
+                }, null, 2);
             };
             img.src = e.target.result;
         };
