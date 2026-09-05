@@ -249,7 +249,7 @@
         let maxLocalDamageCluster = 0;
         let clusterCenter = null;
 
-        const windowSize = 4;
+        const windowSize = 5;
         for (let r = 0; r <= rows - windowSize; r++) {
             for (let c = 0; c <= cols - windowSize; c++) {
                 let zeroMatchesCount = 0;
@@ -270,7 +270,7 @@
             }
         }
 
-        const threshold = isCompressedChannel ? 7 : 4;
+        const threshold = isCompressedChannel ? 16 : 5;
 
         return {
             maxLocalDamageCluster,
@@ -316,33 +316,16 @@
                         }
                     }
                 } else {
+                    // EXACT STRIDE SAMPLING (Bebas filter blur rata-rata)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const srcY = (by + y + 0.5) * scaleY - 0.5;
-                        const y0 = Math.max(0, Math.min(height - 1, Math.floor(srcY)));
-                        const y1 = Math.max(0, Math.min(height - 1, y0 + 1));
-                        const dy = srcY - Math.floor(srcY);
+                        const sy = Math.min(height - 1, Math.floor((by + y) * scaleY));
+                        const rowOffset = sy * width * 4;
 
                         for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const srcX = (bx + x + 0.5) * scaleX - 0.5;
-                            const x0 = Math.max(0, Math.min(width - 1, Math.floor(srcX)));
-                            const x1 = Math.max(0, Math.min(width - 1, x0 + 1));
-                            const dx = srcX - Math.floor(srcX);
+                            const sx = Math.min(width - 1, Math.floor((bx + x) * scaleX));
+                            const p = rowOffset + (sx * 4);
 
-                            const idx00 = (y0 * width + x0) * 4;
-                            const idx10 = (y0 * width + x1) * 4;
-                            const idx01 = (y1 * width + x0) * 4;
-                            const idx11 = (y1 * width + x1) * 4;
-
-                            const l00 = 0.299 * data[idx00] + 0.587 * data[idx00 + 1] + 0.114 * data[idx00 + 2];
-                            const l10 = 0.299 * data[idx10] + 0.587 * data[idx10 + 1] + 0.114 * data[idx10 + 2];
-                            const l01 = 0.299 * data[idx01] + 0.587 * data[idx01 + 1] + 0.114 * data[idx01 + 2];
-                            const l11 = 0.299 * data[idx11] + 0.587 * data[idx11 + 1] + 0.114 * data[idx11 + 2];
-
-                            const luma = (1 - dx) * (1 - dy) * l00 +
-                                         dx * (1 - dy) * l10 +
-                                         (1 - dx) * dy * l01 +
-                                         dx * dy * l11;
-
+                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
                             blockSumLuma += luma;
                             blockLuma[y * BLOCK_SIZE + x] = luma;
                         }
@@ -382,7 +365,6 @@
 
                 } else {
                     darkSealedCount++;
-                    // Evaluasi tamper pasif hanya pada foto asli; di medsos diperlakukan sebagai netral
                     if (!isDownscaled) {
                         if (avgLuma > 35.0 && avgLuma < 235.0) {
                             macroblockMap.push({
