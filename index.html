@@ -53,7 +53,7 @@
 
     <div class="input-group">
         <label for="keyInput">Master Key (Terdeteksi otomatis dari nama berkas):</label>
-        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_3200x2400">
+        <input type="text" id="keyInput" placeholder="Contoh: 1788519491937_3200x1808">
     </div>
 
     <div class="btn-group">
@@ -170,18 +170,49 @@
         const name = fileInput.files[0].name;
         const match = name.match(/IMG_(\d+)/);
         if (match && !keyInput.value) {
-            keyInput.value = `${match[1]}_3200x2400`;
+            // Membaca resolusi aktual file untuk key default
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const tempImg = new Image();
+                tempImg.onload = function() {
+                    let w = tempImg.naturalWidth;
+                    let h = tempImg.naturalHeight;
+                    // Jika file terkompresi medsos (skala sekitar 0.5), proyeksikan ke 3200
+                    if (Math.max(w, h) <= 2048) {
+                        const isPortrait = h > w;
+                        w = isPortrait ? 1808 : 3200;
+                        h = isPortrait ? 3200 : 1808;
+                    }
+                    keyInput.value = `${match[1]}_${w}x${h}`;
+                };
+                tempImg.src = e.target.result;
+            };
+            reader.readAsDataURL(fileInput.files[0]);
         }
     }
 
     function detectCenteredPhotoBounds(width, height, canonicalAspect) {
-        const exactTargetHeight = Math.round(width / canonicalAspect);
-        const topY = Math.max(0, Math.round((height - exactTargetHeight) / 2));
+        let exactTargetWidth, exactTargetHeight;
+        let leftX = 0, topY = 0;
+
+        const currentAspect = width / height;
+
+        if (currentAspect < canonicalAspect) {
+            // Gambar lebih tinggi dari rasio target (misal portrait display)
+            exactTargetWidth = width;
+            exactTargetHeight = Math.round(width / canonicalAspect);
+            topY = Math.max(0, Math.round((height - exactTargetHeight) / 2));
+        } else {
+            // Gambar lebih lebar dari rasio target
+            exactTargetHeight = height;
+            exactTargetWidth = Math.round(height * canonicalAspect);
+            leftX = Math.max(0, Math.round((width - exactTargetWidth) / 2));
+        }
 
         return { 
-            x: 0, 
+            x: leftX, 
             y: topY, 
-            w: width, 
+            w: exactTargetWidth, 
             h: exactTargetHeight 
         };
     }
@@ -232,7 +263,7 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
-    function detectTamperClusters(macroblockMap, targetWidth, targetHeight, isCompressedChannel) {
+    function detectTamperClusters(macroblockMap, targetWidth, targetHeight, threshold, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
         const grid = Array.from({length: rows}, () => new Int8Array(cols).fill(-1));
@@ -250,7 +281,7 @@
         let clusterCenter = null;
 
         const windowSize = 5;
-        // Abaikan 2 blok tepi frame (32px) pada saluran terkompresi medsos
+        // Abaikan 2 blok tepi frame (32px) pada saluran terkompresi
         const borderMargin = isCompressedChannel ? 2 : 0;
 
         for (let r = borderMargin; r <= rows - windowSize - borderMargin; r++) {
@@ -272,8 +303,6 @@
                 }
             }
         }
-
-        const threshold = isCompressedChannel ? 16 : 5;
 
         return {
             maxLocalDamageCluster,
@@ -301,8 +330,8 @@
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
-        // Cek apakah rasio pembagian bulat (misal WhatsApp 1600x1200 ~0.5 / 2.0x)
-        const isIntegerRatio = Math.abs(scaleX - 0.5) < 0.03 && Math.abs(scaleY - 0.5) < 0.03;
+        // Cek apakah rasio pembagian bulat (misal WhatsApp rasio skala ~0.5 / 2.0x)
+        const isIntegerRatio = Math.abs(scaleX - 0.5) < 0.04 && Math.abs(scaleY - 0.5) < 0.04;
 
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
@@ -322,7 +351,7 @@
                         }
                     }
                 } else if (isIntegerRatio) {
-                    // EXACT STRIDE SAMPLING (WhatsApp: rasio bulat 2.0x tanpa blur)
+                    // EXACT STRIDE SAMPLING (WhatsApp: rasio 2.0x tanpa filter blur)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
                         const sy = Math.min(height - 1, Math.floor((by + y) * scaleY));
                         const rowOffset = sy * width * 4;
@@ -335,7 +364,7 @@
                         }
                     }
                 } else {
-                    // AREA-AVERAGED BOX SAMPLING (Facebook: rasio desimal 1.5625x)
+                    // AREA-AVERAGED BOX SAMPLING (Facebook / Skala Desimal)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
                         const startY = (by + y) * scaleY;
                         const endY = (by + y + 1) * scaleY;
@@ -374,9 +403,9 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    // EVALUASI KEMBALI KE PASANGAN DIAGONAL EMAS (2,1) vs (1,2)
-                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1]; // Baris 2, Kolom 1
-                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2]; // Baris 1, Kolom 2
+                    // PASANGAN DIAGONAL EMAS (2,1) vs (1,2)
+                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
+                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const diff1 = c1 - c2;
                     const matched = ((diff1 > 0 ? 1 : 0) === expectedBit);
 
@@ -468,6 +497,7 @@
                 canvas.height = nativeHeight;
                 ctx.drawImage(img, 0, 0, nativeWidth, nativeHeight);
 
+                // Deteksi mode screenshot jika aspek rasio berbeda dari kanonikal
                 const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
                 const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
@@ -533,7 +563,11 @@
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
                 const isCompressedChannel = !isExactNative && !isScreenshot;
-                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight, isCompressedChannel);
+
+                // Dynamic Threshold Kalibrasi Forensik:
+                // Foto mentah: 5 | Screenshot: 14 | Medsos: 16
+                const dynamicThreshold = isExactNative ? 5 : (isScreenshot ? 14 : 16);
+                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight, dynamicThreshold, !isExactNative);
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
 
                 const isOriginAuthentic = res.activeMatchRate >= activeThreshold;
