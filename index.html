@@ -67,7 +67,7 @@
 
     <!-- Modul Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Orthogonal)</div>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
         
         <div class="controls-row">
             <label>
@@ -250,8 +250,7 @@
         let clusterCenter = null;
 
         const windowSize = 5;
-        // Pada saluran kompresi medsos, abaikan 2 blok terluar (32px border margin)
-        // untuk mencegah false positive akibat pemotongan/resampling tepi WhatsApp
+        // Abaikan 2 blok tepi frame (32px) pada saluran terkompresi medsos
         const borderMargin = isCompressedChannel ? 2 : 0;
 
         for (let r = borderMargin; r <= rows - windowSize - borderMargin; r++) {
@@ -302,6 +301,9 @@
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
+        // Cek apakah rasio pembagian bulat (misal WhatsApp 1600x1200 ~0.5 / 2.0x)
+        const isIntegerRatio = Math.abs(scaleX - 0.5) < 0.03 && Math.abs(scaleY - 0.5) < 0.03;
+
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
@@ -319,17 +321,44 @@
                             blockLuma[y * BLOCK_SIZE + x] = luma;
                         }
                     }
-                } else {
-                    // Exact stride integer sampling (menjaga kontras frekuensi)
+                } else if (isIntegerRatio) {
+                    // EXACT STRIDE SAMPLING (WhatsApp: rasio bulat 2.0x tanpa blur)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
                         const sy = Math.min(height - 1, Math.floor((by + y) * scaleY));
                         const rowOffset = sy * width * 4;
-
                         for (let x = 0; x < BLOCK_SIZE; x++) {
                             const sx = Math.min(width - 1, Math.floor((bx + x) * scaleX));
                             const p = rowOffset + (sx * 4);
-
                             const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma;
+                        }
+                    }
+                } else {
+                    // AREA-AVERAGED BOX SAMPLING (Facebook: rasio desimal 1.5625x)
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const startY = (by + y) * scaleY;
+                        const endY = (by + y + 1) * scaleY;
+                        const minSY = Math.max(0, Math.floor(startY));
+                        const maxSY = Math.min(height - 1, Math.floor(endY));
+
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const startX = (bx + x) * scaleX;
+                            const endX = (bx + x + 1) * scaleX;
+                            const minSX = Math.max(0, Math.floor(startX));
+                            const maxSX = Math.min(width - 1, Math.floor(endX));
+
+                            let subLumaSum = 0.0;
+                            let subSamples = 0;
+                            for (let sy = minSY; sy <= maxSY; sy++) {
+                                const rowOffset = sy * width * 4;
+                                for (let sx = minSX; sx <= maxSX; sx++) {
+                                    const p = rowOffset + (sx * 4);
+                                    subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                                    subSamples++;
+                                }
+                            }
+                            const luma = subSamples > 0 ? (subLumaSum / subSamples) : 128.0;
                             blockSumLuma += luma;
                             blockLuma[y * BLOCK_SIZE + x] = luma;
                         }
@@ -345,9 +374,9 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    // EVALUASI PASANGAN ORTOGONAL UTAMA (2,0) vs (0,2)
-                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 0]; // Baris 2, Kolom 0
-                    const c2 = dctCoefficients[0 * BLOCK_SIZE + 2]; // Baris 0, Kolom 2
+                    // EVALUASI KEMBALI KE PASANGAN DIAGONAL EMAS (2,1) vs (1,2)
+                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1]; // Baris 2, Kolom 1
+                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2]; // Baris 1, Kolom 2
                     const diff1 = c1 - c2;
                     const matched = ((diff1 > 0 ? 1 : 0) === expectedBit);
 
@@ -527,7 +556,7 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (1-Bit Orthogonal):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
