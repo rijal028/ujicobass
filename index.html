@@ -67,7 +67,7 @@
 
     <!-- Modul Heatmap -->
     <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
+        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Orthogonal)</div>
         
         <div class="controls-row">
             <label>
@@ -250,8 +250,12 @@
         let clusterCenter = null;
 
         const windowSize = 5;
-        for (let r = 0; r <= rows - windowSize; r++) {
-            for (let c = 0; c <= cols - windowSize; c++) {
+        // Pada saluran kompresi medsos, abaikan 2 blok terluar (32px border margin)
+        // untuk mencegah false positive akibat pemotongan/resampling tepi WhatsApp
+        const borderMargin = isCompressedChannel ? 2 : 0;
+
+        for (let r = borderMargin; r <= rows - windowSize - borderMargin; r++) {
+            for (let c = borderMargin; c <= cols - windowSize - borderMargin; c++) {
                 let zeroMatchesCount = 0;
                 for (let dr = 0; dr < windowSize; dr++) {
                     for (let dc = 0; dc < windowSize; dc++) {
@@ -316,7 +320,7 @@
                         }
                     }
                 } else {
-                    // EXACT STRIDE SAMPLING (Bebas filter blur rata-rata)
+                    // Exact stride integer sampling (menjaga kontras frekuensi)
                     for (let y = 0; y < BLOCK_SIZE; y++) {
                         const sy = Math.min(height - 1, Math.floor((by + y) * scaleY));
                         const rowOffset = sy * width * 4;
@@ -341,8 +345,9 @@
                 fastForwardDCT(blockLuma, dctCoefficients);
 
                 if (isSelected && isLumaSafe) {
-                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
-                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
+                    // EVALUASI PASANGAN ORTOGONAL UTAMA (2,0) vs (0,2)
+                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 0]; // Baris 2, Kolom 0
+                    const c2 = dctCoefficients[0 * BLOCK_SIZE + 2]; // Baris 0, Kolom 2
                     const diff1 = c1 - c2;
                     const matched = ((diff1 > 0 ? 1 : 0) === expectedBit);
 
@@ -522,7 +527,7 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (1-Bit Orthogonal):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
