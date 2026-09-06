@@ -511,11 +511,24 @@
     }
 
     // =========================================================================
-    // DETEKTOR CONTINUOUS SUB-PIXEL SAMPLING (MENCEGAH DRIFT SISA PECAHAN MAKROBLOK)
+    // DETEKTOR ADAPTIF DENGAN PRNG SUPERPOSITION MAPPING (SESUAI USULAN BRILIANMU)
     // =========================================================================
-    function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
+    function runEngineCore(data, width, height, canonicalWidth, canonicalHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
+
+        // 1. Bangun Peta Kanonikal Asli dari Master Seed (1808x3200)
+        const canCols = canonicalWidth / BLOCK_SIZE;
+        const canRows = canonicalHeight / BLOCK_SIZE;
+        const canonicalGrid = Array.from({length: canRows}, () => new Int8Array(canCols));
+
+        for (let r = 0; r < canRows; r++) {
+            for (let c = 0; c < canCols; c++) {
+                const isSelected = rng() <= CAMERA_SCATTER_RATIO;
+                const bit = rng() > 0.5 ? 1 : 0;
+                canonicalGrid[r][c] = isSelected ? (bit === 1 ? 1 : -1) : 0;
+            }
+        }
 
         let totalActiveAudited = 0;
         let matchedActiveBits = 0;
@@ -528,38 +541,57 @@
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
-        const scaleX = width / targetWidth;
-        const scaleY = height / targetHeight;
+        // Skala fisik citra saat ini terhadap kanonikal
+        const scaleX = canonicalWidth / width;
+        const scaleY = canonicalHeight / height;
 
-        for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
-            // Batas fisik makroblok di gambar saat ini (tidak ada baris/kolom terbuang)
-            const y0 = !isDownscaled ? by : (by * scaleY);
-            const y1 = !isDownscaled ? (by + BLOCK_SIZE) : ((by + BLOCK_SIZE) * scaleY);
-            const stepY = (y1 - y0) / BLOCK_SIZE;
+        // 2. Audit Blok Fisik 16x16 Riil pada Citra yang Sedang Diperiksa
+        for (let by = 0; by < height; by += BLOCK_SIZE) {
+            for (let bx = 0; bx < width; bx += BLOCK_SIZE) {
+                // Pastikan blok fisik muat 16x16 utuh di batas citra
+                if (bx + BLOCK_SIZE > width || by + BLOCK_SIZE > height) continue;
 
-            for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
-                const isSelected = rng() <= CAMERA_SCATTER_RATIO;
-                const expectedBit = rng() > 0.5 ? 1 : 0;
+                // Hitung rentang area kanonikal asli yang menyusut ke dalam blok fisik ini
+                const canStartX = bx * scaleX;
+                const canEndX = (bx + BLOCK_SIZE) * scaleX;
+                const canStartY = by * scaleY;
+                const canEndY = (by + BLOCK_SIZE) * scaleY;
 
-                const x0 = !isDownscaled ? bx : (bx * scaleX);
-                const x1 = !isDownscaled ? (bx + BLOCK_SIZE) : ((bx + BLOCK_SIZE) * scaleX);
-                const stepX = (x1 - x0) / BLOCK_SIZE;
+                // Hitung resultan superposisi bit-bit kanonikal yang melebur ke blok ini
+                let expectedSignalSum = 0.0;
+                let activeWeight = 0.0;
 
+                const minCol = Math.max(0, Math.floor(canStartX / BLOCK_SIZE));
+                const maxCol = Math.min(canCols - 1, Math.floor((canEndX - 1) / BLOCK_SIZE));
+                const minRow = Math.max(0, Math.floor(canStartY / BLOCK_SIZE));
+                const maxRow = Math.min(canRows - 1, Math.floor((canEndY - 1) / BLOCK_SIZE));
+
+                for (let r = minRow; r <= maxRow; r++) {
+                    const blockY0 = r * BLOCK_SIZE;
+                    const blockY1 = (r + 1) * BLOCK_SIZE;
+                    const overlapH = Math.max(0, Math.min(canEndY, blockY1) - Math.max(canStartY, blockY0));
+
+                    for (let c = minCol; c <= maxCol; c++) {
+                        const blockX0 = c * BLOCK_SIZE;
+                        const blockX1 = (c + 1) * BLOCK_SIZE;
+                        const overlapW = Math.max(0, Math.min(canEndX, blockX1) - Math.max(canStartX, blockX0));
+
+                        const overlapArea = overlapW * overlapH;
+                        const bitVal = canonicalGrid[r][c]; // +1, -1, atau 0
+
+                        if (bitVal !== 0) {
+                            expectedSignalSum += bitVal * overlapArea;
+                            activeWeight += overlapArea;
+                        }
+                    }
+                }
+
+                // Ambil piksel fisik 16x16 langsung dari citra (tanpa merusak frekuensi ortogonal)
                 let blockSumLuma = 0.0;
-
                 for (let y = 0; y < BLOCK_SIZE; y++) {
-                    // Koordinat riil titik tengah sampel
-                    const sampleY = !isDownscaled 
-                        ? (by + y) 
-                        : Math.min(height - 1, Math.floor(y0 + (y + 0.5) * stepY));
-                    const rowOffset = sampleY * width * 4;
-
+                    const rowOffset = (by + y) * width * 4;
                     for (let x = 0; x < BLOCK_SIZE; x++) {
-                        const sampleX = !isDownscaled 
-                            ? (bx + x) 
-                            : Math.min(width - 1, Math.floor(x0 + (x + 0.5) * stepX));
-                        const p = rowOffset + (sampleX * 4);
-
+                        const p = rowOffset + ((bx + x) * 4);
                         const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
                         blockSumLuma += luma;
                         blockLuma[y * BLOCK_SIZE + x] = luma;
@@ -574,8 +606,12 @@
                 }
                 fastForwardDCT(blockLuma, dctCoefficients);
 
-                if (isSelected && isLumaSafe) {
-                    // C(2,1) vs C(1,2)
+                // Jika resultan sinyal dominan (tidak saling membatalkan murni 0)
+                const isSignalDominant = activeWeight > 0 && Math.abs(expectedSignalSum) > (activeWeight * 0.05);
+
+                if (isSignalDominant && isLumaSafe) {
+                    const expectedBit = expectedSignalSum > 0 ? 1 : 0;
+
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                     const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const diff1 = c1 - c2;
@@ -629,7 +665,9 @@
             totalGapEnergy,
             count100, count0,
             darkSealedCount,
-            macroblockMap
+            macroblockMap,
+            effectiveAuditWidth: width,
+            effectiveAuditHeight: height
         };
     }
 
@@ -679,21 +717,21 @@
                     const bounds = detectCenteredPhotoBounds(nativeWidth, nativeHeight, canonicalAspect);
 
                     const cropCanvas = document.createElement('canvas');
-                    cropCanvas.width = canonicalWidth;
-                    cropCanvas.height = canonicalHeight;
+                    cropCanvas.width = bounds.w;
+                    cropCanvas.height = bounds.h;
                     const cropCtx = cropCanvas.getContext('2d');
 
                     cropCtx.drawImage(
                         canvas,
                         bounds.x, bounds.y, bounds.w, bounds.h,
-                        0, 0, canonicalWidth, canonicalHeight
+                        0, 0, bounds.w, bounds.h
                     );
 
                     previewContainer.style.display = 'block';
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
-                    const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
-                    res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
+                    const croppedData = cropCtx.getImageData(0, 0, bounds.w, bounds.h).data;
+                    res = runEngineCore(croppedData, bounds.w, bounds.h, canonicalWidth, canonicalHeight, rawKeyInput, true);
                     auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
                     activeSourceCanvas = cropCanvas;
                 } else {
@@ -704,8 +742,9 @@
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                     } else {
+                        // Audit Adaptif Langsung pada Dimensi Riil Berkas (Superposisi PRNG)
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Superposisi Kanonikal ${canonicalWidth}x${canonicalHeight})`;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -715,13 +754,13 @@
                 const photoBase = document.getElementById('photoBaseCanvas');
                 const overlay = document.getElementById('heatmapOverlay');
 
-                photoBase.width = canonicalWidth;
-                photoBase.height = canonicalHeight;
-                overlay.width = canonicalWidth;
-                overlay.height = canonicalHeight;
+                photoBase.width = res.effectiveAuditWidth;
+                photoBase.height = res.effectiveAuditHeight;
+                overlay.width = res.effectiveAuditWidth;
+                overlay.height = res.effectiveAuditHeight;
 
                 const pbCtx = photoBase.getContext('2d');
-                pbCtx.drawImage(activeSourceCanvas, 0, 0, canonicalWidth, canonicalHeight);
+                pbCtx.drawImage(activeSourceCanvas, 0, 0, res.effectiveAuditWidth, res.effectiveAuditHeight);
 
                 heatmapContainer.style.display = 'block';
                 const initialOpacity = parseFloat(document.getElementById('opacitySlider').value);
@@ -731,10 +770,11 @@
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
                 
+                // Evaluasi Kluster Dinamis Adaptif
                 const clusterAnalysis = detectTamperClusters(
                     res.macroblockMap, 
-                    canonicalWidth, 
-                    canonicalHeight, 
+                    res.effectiveAuditWidth, 
+                    res.effectiveAuditHeight, 
                     res.activeMatchRate, 
                     !isExactNative
                 );
@@ -794,6 +834,7 @@
                     }
                 }
 
+                // Kirim catatan log ke Supabase
                 if (supabaseClient) {
                     try {
                         await supabaseClient.from('audit_logs').insert([{
@@ -820,7 +861,7 @@
                         ? `<span style="color: #38bdf8; font-weight: bold;">Terdaftar Resmi (Owner HW-ID: ${registeredOwner.device_id})</span>` 
                         : '<span style="color: #94a3b8;">Belum terdaftar di registry publik</span>'}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (Superposisi 1-Bit):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul, melebihi batas toleransi ${clusterAnalysis.thresholdUsed})!</span>` 
