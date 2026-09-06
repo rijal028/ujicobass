@@ -459,7 +459,10 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
-    function detectTamperClusters(macroblockMap, targetWidth, targetHeight, threshold, isCompressedChannel) {
+    // =========================================================================
+    // AMBANG BATAS KLUSTER ADAPTIF BERBASIS ACTIVE MATCH RATE
+    // =========================================================================
+    function detectTamperClusters(macroblockMap, targetWidth, targetHeight, activeMatchRate, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
         const grid = Array.from({length: rows}, () => new Int8Array(cols).fill(-1));
@@ -498,16 +501,27 @@
             }
         }
 
+        // Ambang Batas Adaptif:
+        // Jika match rate 82% -> toleransi kluster alami: 16
+        // Jika match rate 62% -> toleransi kluster alami: 21
+        let adaptiveThreshold;
+        if (!isCompressedChannel) {
+            adaptiveThreshold = 5;
+        } else {
+            const naturalErrorRate = (100.0 - activeMatchRate) / 100.0;
+            adaptiveThreshold = Math.min(24, Math.round(naturalErrorRate * 25 + 12));
+        }
+
         return {
             maxLocalDamageCluster,
             clusterCenter,
-            isLocalTampered: maxLocalDamageCluster >= threshold,
-            thresholdUsed: threshold
+            isLocalTampered: maxLocalDamageCluster >= adaptiveThreshold,
+            thresholdUsed: adaptiveThreshold
         };
     }
 
     // =========================================================================
-    // BILINEAR CONTINUOUS PHASE SAMPLING (MENCEGAH MERATANYA FREKUENSI DCT DI FB)
+    // BILINEAR SAMPLING DENGAN GRID PHASE CORRECTION (TANPA UPSCALE GAMBAR)
     // =========================================================================
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
@@ -524,6 +538,7 @@
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
+        // Skala analitik murni untuk mengarahkan probe detektor (bukan memperbesar citra)
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
@@ -542,7 +557,7 @@
                             const p = ((by + y) * width + (bx + x)) * 4;
                             luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
                         } else {
-                            // BILINEAR CONTINUOUS SAMPLING
+                            // Probe detektor membidik titik tengah fasa makroblok asli secara kontinu
                             const gx = (bx + x + 0.5) * scaleX - 0.5;
                             const gy = (by + y + 0.5) * scaleY - 0.5;
 
@@ -711,6 +726,7 @@
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                     } else {
+                        // Jalankan sampling analitik langsung pada resolusi native berkas tanpa upscale
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
                     }
@@ -737,8 +753,15 @@
                 resultBox.style.display = 'block';
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
-                const dynamicThreshold = isExactNative ? 5 : (isScreenshot ? 14 : 16);
-                const clusterAnalysis = detectTamperClusters(res.macroblockMap, canonicalWidth, canonicalHeight, dynamicThreshold, !isExactNative);
+                
+                // Evaluasi Kluster Dinamis Adaptif
+                const clusterAnalysis = detectTamperClusters(
+                    res.macroblockMap, 
+                    canonicalWidth, 
+                    canonicalHeight, 
+                    res.activeMatchRate, 
+                    !isExactNative
+                );
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
 
                 // ==========================================
@@ -774,7 +797,7 @@
                 } else if (isLocalTampered) {
                     verdict = "TAMPER_DETECTED";
                     resultBox.className = "result-box tampered";
-                    resultTitle.innerHTML = `🟡 CORETAN / MANIPULASI MIKRO TERDETEKSI! (${res.count0} blok rusak)`;
+                    resultTitle.innerHTML = `🟡 CORETAN / MANIPULASI MIKRO TERDETEKSI! (${res.count0} blok rusak, Peak: ${clusterAnalysis.maxLocalDamageCluster}/${clusterAnalysis.thresholdUsed})`;
                 } else if (isLeakAlert) {
                     verdict = "UNAUTHORIZED_LEAK";
                     resultBox.className = "result-box leak";
@@ -791,7 +814,7 @@
                     } else {
                         verdict = "VERIFIED_MULTI_TRANSCODED";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB)`;
+                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB / FB Resolusi Agresif)`;
                     }
                 }
 
@@ -825,8 +848,8 @@
                     <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
-                        ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
-                        : '<span style="color: #34d399;">Kerusakan menyebar wajar (Bebas manipulasi lokal)</span>'}<br>
+                        ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul, melebihi batas toleransi ${clusterAnalysis.thresholdUsed})!</span>` 
+                        : `<span style="color: #34d399;">Kerusakan menyebar wajar (Peak: ${clusterAnalysis.maxLocalDamageCluster}, batas toleransi aman: ${clusterAnalysis.thresholdUsed})</span>`}<br>
                     ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Peringatan: Foto ini berstatus PRIVATE oleh pemilik asli (${registeredOwner.device_id}) namun ditemukan diaudit dari kanal publik!</span><br>` : ''}
 
                     <div class="distribution-box">
@@ -836,7 +859,7 @@
                             <div class="bar-0" style="width: ${p0}%;" title="0% Rusak"></div>
                         </div>
                         <span style="color: #34d399;">■ Utuh: ${res.count100} (${p100}%)</span> | 
-                        <span style="color: #f87171; font-weight: bold;">■ Rusak (Tamper): ${res.count0} (${p0}%)</span>
+                        <span style="color: #f87171; font-weight: bold;">■ Rusak (Kompresi/Tamper): ${res.count0} (${p0}%)</span>
                     </div>
                 `;
 
@@ -846,6 +869,7 @@
                     active_match: res.activeMatchRate.toFixed(6),
                     tamper_cluster_detected: isLocalTampered,
                     cluster_damage_peak: clusterAnalysis.maxLocalDamageCluster,
+                    cluster_threshold_used: clusterAnalysis.thresholdUsed,
                     tamper_blocks_count: res.count0,
                     owner_device_id: registeredOwner ? registeredOwner.device_id : "UNREGISTERED",
                     leak_detected: isLeakAlert
