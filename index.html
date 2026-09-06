@@ -3,23 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecurePixel 1-Bit Forensic Engine</title>
+    <title>SecurePixel Forensic & Ownership Hub</title>
     <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- ExifReader untuk membaca metadata HW-ID & Signature jika ada -->
+    <!-- ExifReader untuk membaca metadata HW-ID & Signature -->
     <script src="https://cdn.jsdelivr.net/npm/exifreader@4.20.0/dist/exif-reader.min.js"></script>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 860px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.3rem; margin-top: 0; color: #38bdf8; text-align: center; }
+        
+        /* Tab Navigation */
+        .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
+        .tab-btn { flex: 1; padding: 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #94a3b8; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .tab-btn.active { background: #0284c7; color: #fff; border-color: #38bdf8; }
+        
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
         .input-group { margin-bottom: 16px; }
         label { display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 6px; }
-        input[type="text"], input[type="file"] { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; }
+        input[type="text"], input[type="file"], select { width: 100%; padding: 10px; background-color: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; }
         .btn-group { display: flex; gap: 10px; margin-top: 14px; }
         button { flex: 1; padding: 12px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .btn-verify { background-color: #0284c7; }
         .btn-verify:hover { background-color: #0369a1; }
+        .btn-register { background-color: #10b981; }
+        .btn-register:hover { background-color: #059669; }
+
         .result-box { margin-top: 20px; padding: 16px; border-radius: 8px; display: none; }
         .valid { background-color: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #34d399; }
         .tampered { background-color: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; }
@@ -49,62 +61,115 @@
 <body>
 
 <div class="card">
-    <h1>SecurePixel 1-Bit Full-Surface Forensic Engine</h1>
+    <h1>SecurePixel Forensic & Ownership Hub</h1>
 
-    <div class="input-group">
-        <label for="imageInput">Pilih Berkas Citra (Asli Kamera / Medsos / Screenshot):</label>
-        <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
+    <!-- Navigasi Tab -->
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('auditTab')">🔍 Audit Forensik & Verifikasi</button>
+        <button class="tab-btn" onclick="switchTab('registerTab')">🛡️ Daftarkan Kepemilikan (Pemilik Asli)</button>
     </div>
 
-    <div class="input-group">
-        <label for="keyInput">Master Key (Terdeteksi otomatis dari nama berkas):</label>
-        <input type="text" id="keyInput" placeholder="Contoh: 1788597108139_1808x3200">
-    </div>
-
-    <div class="btn-group">
-        <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 1-Bit</button>
-    </div>
-
-    <div id="previewContainer" class="preview-box">
-        <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris:</span><br>
-        <img id="cropPreview" class="preview-img" alt="Cropped preview">
-    </div>
-
-    <!-- Modul Heatmap -->
-    <div id="heatmapContainer" class="heatmap-wrapper">
-        <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
-        
-        <div class="controls-row">
-            <label>
-                <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
-                <b>Sorot Area Cacat / Coretan Saja (Rekomendasi)</b>
-            </label>
-            <label>
-                <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
-                Tampilkan Seluruh Grid (Termasuk Hijau)
-            </label>
+    <!-- ======================================================== -->
+    <!-- TAB 1: AUDIT & VERIFIKASI (UNTUK SEMUA PIHAK)             -->
+    <!-- ======================================================== -->
+    <div id="auditTab" class="tab-content active">
+        <div class="input-group">
+            <label for="imageInput">Pilih Berkas Citra (Asli Kamera / Medsos / Screenshot):</label>
+            <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
         </div>
 
-        <div class="heatmap-canvas-container" style="margin-top: 10px;">
-            <canvas id="photoBaseCanvas"></canvas>
-            <canvas id="heatmapOverlay"></canvas>
+        <div class="input-group">
+            <label for="keyInput">Master Key (Terdeteksi otomatis atau input manual):</label>
+            <input type="text" id="keyInput" placeholder="Contoh: 1788597108139_1808x3200">
         </div>
 
-        <div class="controls-row">
-            <span>Transparansi Kerusakan:</span>
-            <input type="range" id="opacitySlider" min="0.2" max="1" step="0.05" value="0.85" oninput="updateHeatmapOpacity(this.value)">
-            <span id="opacityVal">85%</span>
+        <div class="btn-group">
+            <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 1-Bit</button>
+        </div>
+
+        <div id="previewContainer" class="preview-box">
+            <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris:</span><br>
+            <img id="cropPreview" class="preview-img" alt="Cropped preview">
+        </div>
+
+        <div id="heatmapContainer" class="heatmap-wrapper">
+            <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
+            
+            <div class="controls-row">
+                <label>
+                    <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
+                    <b>Sorot Area Cacat / Coretan Saja</b>
+                </label>
+                <label>
+                    <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
+                    Tampilkan Seluruh Grid
+                </label>
+            </div>
+
+            <div class="heatmap-canvas-container" style="margin-top: 10px;">
+                <canvas id="photoBaseCanvas"></canvas>
+                <canvas id="heatmapOverlay"></canvas>
+            </div>
+
+            <div class="controls-row">
+                <span>Transparansi Kerusakan:</span>
+                <input type="range" id="opacitySlider" min="0.2" max="1" step="0.05" value="0.85" oninput="updateHeatmapOpacity(this.value)">
+                <span id="opacityVal">85%</span>
+            </div>
+        </div>
+
+        <div id="resultBox" class="result-box">
+            <div id="resultTitle" style="font-weight: bold; font-size: 1.1rem;"></div>
+            <div id="resultMeta" class="meta-info"></div>
+
+            <div class="fingerprint-box">
+                <b>Payload Audit Supabase (JSON):</b><br>
+                <pre id="jsonPayload" class="fingerprint-val" style="margin: 6px 0; white-space: pre-wrap;"></pre>
+            </div>
         </div>
     </div>
 
-    <div id="resultBox" class="result-box">
-        <div id="resultTitle" style="font-weight: bold; font-size: 1.1rem;"></div>
-        <div id="resultMeta" class="meta-info"></div>
-
-        <div class="fingerprint-box">
-            <b>Payload Audit Supabase (JSON & Sinkronisasi Cloud):</b><br>
-            <pre id="jsonPayload" class="fingerprint-val" style="margin: 6px 0; white-space: pre-wrap;"></pre>
+    <!-- ======================================================== -->
+    <!-- TAB 2: DAFTARKAN KEPEMILIKAN BARU (KHUSUS PEMILIK ASLI)  -->
+    <!-- ======================================================== -->
+    <div id="registerTab" class="tab-content">
+        <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid #0284c7; padding: 12px; border-radius: 6px; font-size: 0.85rem; color: #bae6fd; margin-bottom: 16px;">
+            ℹ️ <b>Petunjuk Pemilik:</b> Unggah foto asli mentah dari kamera. Kunci Master, Hardware Device ID, dan Tanda Tangan Digital akan diekstrak otomatis untuk mengunci akta kepemilikan di Supabase.
         </div>
+
+        <div class="input-group">
+            <label for="regFileInput">Pilih Foto Asli Kamera (Wajib ada metadata EXIF asli):</label>
+            <input type="file" id="regFileInput" accept="image/jpeg" onchange="handleRegisterFileSelect()">
+        </div>
+
+        <div class="input-group">
+            <label for="regMasterKey">Master Key Terdeteksi:</label>
+            <input type="text" id="regMasterKey" placeholder="Akan terisi otomatis...">
+        </div>
+
+        <div class="input-group">
+            <label for="regDeviceId">Hardware Device ID (HW-ID):</label>
+            <input type="text" id="regDeviceId" placeholder="Akan terisi otomatis dari Android Keystore...">
+        </div>
+
+        <div class="input-group">
+            <label for="regSignature">Hardware ECDSA Signature:</label>
+            <input type="text" id="regSignature" placeholder="Tanda tangan kriptografis hardware...">
+        </div>
+
+        <div class="input-group">
+            <label for="regStatus">Status Rilis Media:</label>
+            <select id="regStatus">
+                <option value="false">🔒 Private (Kirim Peringatan Kebocoran jika beredar di Medsos/Luar)</option>
+                <option value="true">🌐 Public (Foto diizinkan disebar & diaudit bebas)</option>
+            </select>
+        </div>
+
+        <div class="btn-group">
+            <button class="btn-register" onclick="registerPhotoToCloud()">Daftarkan Hak Kepemilikan ke Supabase</button>
+        </div>
+
+        <div id="regResultBox" class="result-box" style="margin-top: 16px;"></div>
     </div>
 </div>
 
@@ -112,7 +177,7 @@
 
 <script>
     // ==========================================
-    // 1. KONFIGURASI SUPABASE (Terhubung Aktif)
+    // 1. KONFIGURASI SUPABASE AKTIF
     // ==========================================
     const SUPABASE_URL = "https://rrfgkzgrendiibkxtamx.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyZmdremdyZW5kaWlia3h0YW14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2Njk4ODQsImV4cCI6MjEwNDI0NTg4NH0.34k6GGwUNg0GgprPHU125aUwRBSyE4nYH6xAthRhj_0";
@@ -120,11 +185,109 @@
     let supabaseClient = null;
     try {
         supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        console.log("Supabase Client berhasil terhubung!");
+        console.log("Supabase Client siap digunakan!");
     } catch(e) {
-        console.warn("Gagal inisialisasi Supabase:", e);
+        console.warn("Koneksi Supabase gagal:", e);
     }
 
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+        if (tabId === 'auditTab') {
+            document.querySelectorAll('.tab-btn')[0].classList.add('active');
+            document.getElementById('auditTab').classList.add('active');
+        } else {
+            document.querySelectorAll('.tab-btn')[1].classList.add('active');
+            document.getElementById('registerTab').classList.add('active');
+        }
+    }
+
+    // ==========================================
+    // 2. FUNGSI LOGIKA REGISTRASI FOTO KE CLOUD
+    // ==========================================
+    async function handleRegisterFileSelect() {
+        const fileInput = document.getElementById('regFileInput');
+        const regMasterKey = document.getElementById('regMasterKey');
+        const regDeviceId = document.getElementById('regDeviceId');
+        const regSignature = document.getElementById('regSignature');
+        const regBox = document.getElementById('regResultBox');
+        regBox.style.display = 'none';
+
+        if (!fileInput.files[0]) return;
+        const file = fileInput.files[0];
+
+        try {
+            const tags = await ExifReader.load(file);
+            if (tags['UserComment'] && tags['UserComment'].value) {
+                const comment = typeof tags['UserComment'].value === 'string' 
+                    ? tags['UserComment'].value 
+                    : String.fromCharCode.apply(null, tags['UserComment'].value);
+
+                if (comment.startsWith('SECUREPIXEL_V2|')) {
+                    const segs = comment.split('|');
+                    if (segs.length >= 4) {
+                        regMasterKey.value = segs[1];
+                        regDeviceId.value = segs[2];
+                        regSignature.value = segs[3];
+                        return;
+                    }
+                }
+            }
+            alert('Peringatan: Berkas ini tidak memiliki metadata SECUREPIXEL_V2 lengkap (kemungkinan sudah dibersihkan atau bukan dari kamera resmi). Anda tetap bisa mengisi kolom secara manual.');
+        } catch(err) {
+            console.error(err);
+        }
+    }
+
+    async function registerPhotoToCloud() {
+        const masterKey = document.getElementById('regMasterKey').value.trim();
+        const deviceId = document.getElementById('regDeviceId').value.trim();
+        const signature = document.getElementById('regSignature').value.trim();
+        const isPublic = document.getElementById('regStatus').value === 'true';
+        const regBox = document.getElementById('regResultBox');
+
+        if (!masterKey || !deviceId) {
+            alert('Master Key dan Hardware Device ID wajib diisi!');
+            return;
+        }
+
+        if (!supabaseClient) {
+            alert('Supabase client belum terhubung!');
+            return;
+        }
+
+        try {
+            const { data, error } = await supabaseClient
+                .from('photo_registry')
+                .upsert([{
+                    master_key: masterKey,
+                    device_id: deviceId,
+                    hardware_signature: signature || "SIG_MANUAL_REG",
+                    is_public_released: isPublic
+                }], { onConflict: 'master_key' });
+
+            if (error) throw error;
+
+            regBox.className = "result-box valid";
+            regBox.style.display = 'block';
+            regBox.innerHTML = `
+                <b>✅ Berhasil Didaftarkan ke Supabase!</b><br>
+                <b>Master Key:</b> ${masterKey}<br>
+                <b>Terikat ke Device ID:</b> ${deviceId}<br>
+                <b>Status Privasi:</b> ${isPublic ? '🌐 Public (Bebas sebar)' : '🔒 Private (Proteksi Kebocoran Aktif)'}<br>
+                <i>Foto ini sekarang memiliki akta kelahiran digital resmi di cloud.</i>
+            `;
+        } catch(err) {
+            regBox.className = "result-box invalid";
+            regBox.style.display = 'block';
+            regBox.innerHTML = `<b>Gagal Registrasi:</b> ${err.message}`;
+        }
+    }
+
+    // ==========================================
+    // 3. LOGIKA ENGINE FORENSIK 1-BIT DCT
+    // ==========================================
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 1.00;
 
@@ -208,9 +371,7 @@
                     }
                 }
             }
-        } catch(err) {
-            // Berkas dari medsos umumnya EXIF sudah dibersihkan
-        }
+        } catch(err) {}
 
         if (match && !keyInput.value) {
             const reader = new FileReader();
@@ -592,7 +753,7 @@
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
 
                 // ==========================================
-                // 2. INTEGRASI 3-TIER POLICY & SUPABASE AUDIT
+                // EVALUASI 3-TIER POLICY & CLOUD REGISTRY
                 // ==========================================
                 let verdict = "UNKNOWN";
                 let registeredOwner = null;
@@ -608,6 +769,7 @@
 
                         if (data) {
                             registeredOwner = data;
+                            // Jika foto privat diaudit dari kanal kompresi/screenshot
                             if (!data.is_public_released && !isExactNative) {
                                 isLeakAlert = true;
                             }
@@ -645,7 +807,7 @@
                     }
                 }
 
-                // Kirim log audit ke Supabase
+                // Kirim catatan audit log ke Supabase
                 if (supabaseClient) {
                     try {
                         await supabaseClient.from('audit_logs').insert([{
@@ -677,7 +839,7 @@
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
                         : '<span style="color: #34d399;">Kerusakan menyebar wajar (Bebas manipulasi lokal)</span>'}<br>
-                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Peringatan: Foto ini belum dirilis resmi oleh pemilik asli (${registeredOwner.device_id}) namun telah diaudit dari kanal publik!</span><br>` : ''}
+                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Peringatan: Foto ini berstatus PRIVATE oleh pemilik asli (${registeredOwner.device_id}) namun ditemukan diaudit dari kanal publik!</span><br>` : ''}
 
                     <div class="distribution-box">
                         <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
