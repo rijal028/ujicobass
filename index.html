@@ -6,7 +6,7 @@
     <title>SecurePixel Forensic & Ownership Hub</title>
     <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- ExifReader untuk membaca metadata HW-ID & Signature -->
+    <!-- ExifReader untuk membaca metadata HW-ID & Signature jika ada -->
     <script src="https://cdn.jsdelivr.net/npm/exifreader@4.20.0/dist/exif-reader.min.js"></script>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -288,27 +288,10 @@
     }
 
     // ==========================================
-    // 3. ENGINE FORENSIK 1-BIT DCT PER MAKROBLOK
+    // 3. ENGINE FORENSIK 1-BIT DCT MULTI-SCALE
     // ==========================================
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 1.00;
-
-    const C = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
-    const CT = Array.from({length: BLOCK_SIZE}, () => new Float64Array(BLOCK_SIZE));
-    const invSqrtN = 1.0 / Math.sqrt(BLOCK_SIZE);
-    const sqrt2DivN = Math.sqrt(2.0 / BLOCK_SIZE);
-
-    for (let j = 0; j < BLOCK_SIZE; j++) {
-        C[0][j] = invSqrtN;
-        CT[j][0] = invSqrtN;
-    }
-    for (let i = 1; i < BLOCK_SIZE; i++) {
-        for (let j = 0; j < BLOCK_SIZE; j++) {
-            const val = sqrt2DivN * Math.cos(((2 * j + 1) * i * Math.PI) / (2.0 * BLOCK_SIZE));
-            C[i][j] = val;
-            CT[j][i] = val;
-        }
-    }
 
     function createPRNG(seed) {
         let state = Number(BigInt(seed) % 2147483647n);
@@ -328,22 +311,33 @@
         return Math.abs(hash);
     }
 
-    function fastForwardDCT(inputBlock, outputCoefficients) {
-        const temp = new Float64Array(BLOCK_SIZE * BLOCK_SIZE);
-        for (let i = 0; i < BLOCK_SIZE; i++) {
-            for (let j = 0; j < BLOCK_SIZE; j++) {
-                let sum = 0.0;
-                for (let k = 0; k < BLOCK_SIZE; k++) sum += C[i][k] * inputBlock[k * BLOCK_SIZE + j];
-                temp[i * BLOCK_SIZE + j] = sum;
+    // Ekstraksi Frekuensi Ortogonal Fleksibel C(2,1) vs C(1,2)
+    function extractGoldPairPolarity(block, N) {
+        const alpha = (k) => (k === 0 ? 1.0 / Math.sqrt(N) : Math.sqrt(2.0 / N));
+        const factor21 = alpha(2) * alpha(1);
+        const factor12 = alpha(1) * alpha(2);
+
+        let c21 = 0.0;
+        let c12 = 0.0;
+
+        for (let y = 0; y < N; y++) {
+            const cosY1 = Math.cos(((2 * y + 1) * 1 * Math.PI) / (2.0 * N));
+            const cosY2 = Math.cos(((2 * y + 1) * 2 * Math.PI) / (2.0 * N));
+
+            for (let x = 0; x < N; x++) {
+                const val = block[y * N + x] - 128.0;
+                const cosX2 = Math.cos(((2 * x + 1) * 2 * Math.PI) / (2.0 * N));
+                const cosX1 = Math.cos(((2 * x + 1) * 1 * Math.PI) / (2.0 * N));
+
+                c21 += val * cosY1 * cosX2;
+                c12 += val * cosY2 * cosX1;
             }
         }
-        for (let i = 0; i < BLOCK_SIZE; i++) {
-            for (let j = 0; j < BLOCK_SIZE; j++) {
-                let sum = 0.0;
-                for (let k = 0; k < BLOCK_SIZE; k++) sum += temp[i * BLOCK_SIZE + k] * CT[k][j];
-                outputCoefficients[i * BLOCK_SIZE + j] = sum;
-            }
-        }
+
+        c21 *= factor21;
+        c12 *= factor12;
+
+        return c21 - c12;
     }
 
     let detectedHWInfo = { deviceId: null, signature: null };
@@ -459,9 +453,6 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
-    // =========================================================================
-    // AMBANG BATAS KLUSTER ADAPTIF BERBASIS ACTIVE MATCH RATE
-    // =========================================================================
     function detectTamperClusters(macroblockMap, targetWidth, targetHeight, activeMatchRate, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
@@ -518,7 +509,7 @@
     }
 
     // =========================================================================
-    // SAMPLING PROPORSONAL INDEPENDEN (TANPA DUPLIKASI, TANPA AVERAGE TETANGGA)
+    // DETEKTOR KONTINU SUB-PIXEL (MENCEGAH HILANGNYA PECAHAN MAKROBLOK BERANTAI)
     // =========================================================================
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
@@ -531,71 +522,54 @@
         let darkSealedCount = 0;
 
         const macroblockMap = [];
-        const totalPixelsPerBlock = BLOCK_SIZE * BLOCK_SIZE;
-        const blockLuma = new Float64Array(totalPixelsPerBlock);
-        const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
-        // Skala analitik kanonikal ke resolusi berkas
+        // Hitung skala kontinu
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
+        // Tentukan dimensi basis N efektif secara dinamis (misal 16, 10, atau 8)
+        const avgBlockPhysicalDim = (BLOCK_SIZE * scaleX + BLOCK_SIZE * scaleY) / 2.0;
+        const effN = !isDownscaled ? 16 : Math.max(6, Math.min(16, Math.round(avgBlockPhysicalDim)));
+        const blockBuffer = new Float64Array(effN * effN);
+
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
+            // Rentang batas fisik vertikal makroblok saat ini (tidak ada baris yang hilang)
+            const y0 = !isDownscaled ? by : (by * scaleY);
+            const y1 = !isDownscaled ? (by + BLOCK_SIZE) : ((by + BLOCK_SIZE) * scaleY);
+            const stepY = (y1 - y0) / effN;
+
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
                 const isSelected = rng() <= CAMERA_SCATTER_RATIO;
                 const expectedBit = rng() > 0.5 ? 1 : 0;
 
+                // Rentang batas fisik horizontal makroblok saat ini (tidak ada kolom yang hilang)
+                const x0 = !isDownscaled ? bx : (bx * scaleX);
+                const x1 = !isDownscaled ? (bx + BLOCK_SIZE) : ((bx + BLOCK_SIZE) * scaleX);
+                const stepX = (x1 - x0) / effN;
+
                 let blockSumLuma = 0.0;
 
-                if (!isDownscaled) {
-                    // Foto Asli Kamera Murni 1:1
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const rowIdx = ((by + y) * width + bx) * 4;
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const p = rowIdx + (x * 4);
-                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma;
-                        }
-                    }
-                } else {
-                    // Berkas Terkompresi (WA, FB, WA->FB): Sampling Proporsional di Ruang Makroblok Riil
-                    const realStartX = bx * scaleX;
-                    const realStartY = by * scaleY;
-                    const realBlockW = BLOCK_SIZE * scaleX;
-                    const realBlockH = BLOCK_SIZE * scaleY;
+                for (let py = 0; py < effN; py++) {
+                    const sampleY = Math.min(height - 1, Math.floor(y0 + (py + 0.5) * stepY));
+                    const rowOffset = sampleY * width * 4;
 
-                    const stepX = realBlockW / BLOCK_SIZE;
-                    const stepY = realBlockH / BLOCK_SIZE;
+                    for (let px = 0; px < effN; px++) {
+                        const sampleX = Math.min(width - 1, Math.floor(x0 + (px + 0.5) * stepX));
+                        const p = rowOffset + (sampleX * 4);
 
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const sampleY = Math.min(height - 1, Math.floor(realStartY + (y + 0.5) * stepY));
-                        const rowOffset = sampleY * width * 4;
-
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const sampleX = Math.min(width - 1, Math.floor(realStartX + (x + 0.5) * stepX));
-                            const p = rowOffset + (sampleX * 4);
-                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma;
-                        }
+                        const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                        blockBuffer[py * effN + px] = luma;
+                        blockSumLuma += luma;
                     }
                 }
 
-                const avgLuma = blockSumLuma / totalPixelsPerBlock;
+                const avgLuma = blockSumLuma / (effN * effN);
                 const isLumaSafe = (avgLuma >= 15.0 && avgLuma <= 240.0);
 
-                for (let i = 0; i < totalPixelsPerBlock; i++) {
-                    blockLuma[i] -= 128.0;
-                }
-                fastForwardDCT(blockLuma, dctCoefficients);
-
                 if (isSelected && isLumaSafe) {
-                    // PASANGAN DIAGONAL EMAS (2,1) vs (1,2)
-                    const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
-                    const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
-                    const diff1 = c1 - c2;
-                    const matched = ((diff1 > 0 ? 1 : 0) === expectedBit);
+                    // Ekstraksi polaritas langsung pada basis ortogonal dimensi fisik efektif
+                    const diff = extractGoldPairPolarity(blockBuffer, effN);
+                    const matched = ((diff > 0 ? 1 : 0) === expectedBit);
 
                     if (matched) {
                         matchedActiveBits++;
@@ -604,7 +578,7 @@
                         count0++;
                     }
 
-                    totalGapEnergy += Math.abs(diff1);
+                    totalGapEnergy += Math.abs(diff);
                     totalActiveAudited++;
 
                     macroblockMap.push({
@@ -645,7 +619,8 @@
             totalGapEnergy,
             count100, count0,
             darkSealedCount,
-            macroblockMap
+            macroblockMap,
+            effectiveBasisN: effN
         };
     }
 
@@ -721,7 +696,7 @@
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Basis Dinamis N=${res.effectiveBasisN})`;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -807,7 +782,7 @@
                     } else {
                         verdict = "VERIFIED_MULTI_TRANSCODED";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB / FB Resolusi Agresif)`;
+                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB)`;
                     }
                 }
 
@@ -840,6 +815,7 @@
                     <b>Mode Audit:</b> ${auditMode}<br>
                     <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
+                    <b>Basis DCT Efektif:</b> N = ${res.effectiveBasisN} piksel/makroblok fisik<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul, melebihi batas toleransi ${clusterAnalysis.thresholdUsed})!</span>` 
                         : `<span style="color: #34d399;">Kerusakan menyebar wajar (Peak: ${clusterAnalysis.maxLocalDamageCluster}, batas toleransi aman: ${clusterAnalysis.thresholdUsed})</span>`}<br>
@@ -860,6 +836,7 @@
                     audit_status: verdict,
                     mode: auditMode,
                     active_match: res.activeMatchRate.toFixed(6),
+                    effective_basis_n: res.effectiveBasisN,
                     tamper_cluster_detected: isLocalTampered,
                     cluster_damage_peak: clusterAnalysis.maxLocalDamageCluster,
                     cluster_threshold_used: clusterAnalysis.thresholdUsed,
