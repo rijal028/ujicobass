@@ -459,6 +459,9 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
+    // =========================================================================
+    // AMBANG BATAS KLUSTER ADAPTIF BERBASIS ACTIVE MATCH RATE
+    // =========================================================================
     function detectTamperClusters(macroblockMap, targetWidth, targetHeight, activeMatchRate, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
@@ -515,7 +518,7 @@
     }
 
     // =========================================================================
-    // EXACT DISCRETE PROBE (MURNI PER MAKROBLOK - TANPA PENGGABUNGAN/AVERAGING)
+    // SAMPLING PROPORSONAL INDEPENDEN (TANPA DUPLIKASI, TANPA AVERAGE TETANGGA)
     // =========================================================================
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
@@ -532,6 +535,7 @@
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
+        // Skala analitik kanonikal ke resolusi berkas
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
 
@@ -542,24 +546,39 @@
 
                 let blockSumLuma = 0.0;
 
-                for (let y = 0; y < BLOCK_SIZE; y++) {
-                    // Indeks baris diskrit murni
-                    const sy = !isDownscaled 
-                        ? (by + y) 
-                        : Math.min(height - 1, Math.floor((by + y) * scaleY));
-                    const rowOffset = sy * width * 4;
+                if (!isDownscaled) {
+                    // Foto Asli Kamera Murni 1:1
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const rowIdx = ((by + y) * width + bx) * 4;
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const p = rowIdx + (x * 4);
+                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma;
+                        }
+                    }
+                } else {
+                    // Berkas Terkompresi (WA, FB, WA->FB): Sampling Proporsional di Ruang Makroblok Riil
+                    const realStartX = bx * scaleX;
+                    const realStartY = by * scaleY;
+                    const realBlockW = BLOCK_SIZE * scaleX;
+                    const realBlockH = BLOCK_SIZE * scaleY;
 
-                    for (let x = 0; x < BLOCK_SIZE; x++) {
-                        // Indeks kolom diskrit murni (tanpa membaurkan 4 tetangga)
-                        const sx = !isDownscaled 
-                            ? (bx + x) 
-                            : Math.min(width - 1, Math.floor((bx + x) * scaleX));
+                    const stepX = realBlockW / BLOCK_SIZE;
+                    const stepY = realBlockH / BLOCK_SIZE;
 
-                        const p = rowOffset + (sx * 4);
-                        const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                    for (let y = 0; y < BLOCK_SIZE; y++) {
+                        const sampleY = Math.min(height - 1, Math.floor(realStartY + (y + 0.5) * stepY));
+                        const rowOffset = sampleY * width * 4;
 
-                        blockSumLuma += luma;
-                        blockLuma[y * BLOCK_SIZE + x] = luma;
+                        for (let x = 0; x < BLOCK_SIZE; x++) {
+                            const sampleX = Math.min(width - 1, Math.floor(realStartX + (x + 0.5) * stepX));
+                            const p = rowOffset + (sampleX * 4);
+                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+
+                            blockSumLuma += luma;
+                            blockLuma[y * BLOCK_SIZE + x] = luma;
+                        }
                     }
                 }
 
@@ -701,7 +720,6 @@
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                     } else {
-                        // Audit diskrit langsung pada matriks piksel citra tanpa pembobotan gabungan
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
                     }
@@ -729,6 +747,7 @@
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
                 
+                // Evaluasi Kluster Dinamis Adaptif
                 const clusterAnalysis = detectTamperClusters(
                     res.macroblockMap, 
                     canonicalWidth, 
@@ -788,7 +807,7 @@
                     } else {
                         verdict = "VERIFIED_MULTI_TRANSCODED";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB)`;
+                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB / FB Resolusi Agresif)`;
                     }
                 }
 
