@@ -112,19 +112,17 @@
 
 <script>
     // ==========================================
-    // 1. KONFIGURASI SUPABASE (Isi dengan milikmu)
+    // 1. KONFIGURASI SUPABASE (Terhubung Aktif)
     // ==========================================
-    const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
-    const SUPABASE_ANON_KEY = "YOUR_ANON_PUBLIC_KEY";
+    const SUPABASE_URL = "https://rrfgkzgrendiibkxtamx.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyZmdremdyZW5kaWlia3h0YW14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2Njk4ODQsImV4cCI6MjEwNDI0NTg4NH0.34k6GGwUNg0GgprPHU125aUwRBSyE4nYH6xAthRhj_0";
     
-    // Inisialisasi Supabase Client
     let supabaseClient = null;
     try {
-        if (SUPABASE_URL !== "https://YOUR_PROJECT_ID.supabase.co") {
-            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        }
+        supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        console.log("Supabase Client berhasil terhubung!");
     } catch(e) {
-        console.warn("Supabase credentials belum diisi:", e);
+        console.warn("Gagal inisialisasi Supabase:", e);
     }
 
     const BLOCK_SIZE = 16; 
@@ -194,7 +192,6 @@
         const name = file.name;
         const match = name.match(/IMG_(\d+)/);
 
-        // Ekstraksi EXIF jika berkas asli/langsung dari kamera
         try {
             const tags = await ExifReader.load(file);
             if (tags['UserComment'] && tags['UserComment'].value) {
@@ -212,7 +209,7 @@
                 }
             }
         } catch(err) {
-            // Berkas dari medsos umumnya EXIF sudah dihapus (abaikan)
+            // Berkas dari medsos umumnya EXIF sudah dibersihkan
         }
 
         if (match && !keyInput.value) {
@@ -565,7 +562,7 @@
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
-                        activeThreshold = 60.0; // Kompatibel Tier 3 Multi-Medsos
+                        activeThreshold = 60.0;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -601,7 +598,6 @@
                 let registeredOwner = null;
                 let isLeakAlert = false;
 
-                // Cek data registrasi ke Supabase
                 if (supabaseClient) {
                     try {
                         const { data, error } = await supabaseClient
@@ -612,7 +608,6 @@
 
                         if (data) {
                             registeredOwner = data;
-                            // Jika pemilik belum menandai publik tapi foto diaudit di kanal kompresi/luar
                             if (!data.is_public_released && !isExactNative) {
                                 isLeakAlert = true;
                             }
@@ -622,7 +617,6 @@
                     }
                 }
 
-                // Evaluasi 3-Tier Policy
                 if (res.activeMatchRate < 60.0) {
                     verdict = "INVALID_KEY_OR_IMAGE";
                     resultBox.className = "result-box invalid";
@@ -636,7 +630,6 @@
                     resultBox.className = "result-box leak";
                     resultTitle.innerHTML = `⚠️ PERINGATAN KEBOCORAN / REPOST TIDAK RESMI! (${res.activeMatchRate.toFixed(2)}%)`;
                 } else {
-                    // Penentuan Tier Lolos Hijau
                     if (res.activeMatchRate >= 95.0) {
                         verdict = "VERIFIED_ORIGINAL_RAW";
                         resultBox.className = "result-box valid";
@@ -684,7 +677,7 @@
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul)!</span>` 
                         : '<span style="color: #34d399;">Kerusakan menyebar wajar (Bebas manipulasi lokal)</span>'}<br>
-                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Foto ini belum dirilis resmi oleh pemilik asli (${registeredOwner.device_id}) namun telah diaudit dari kanal publik!</span><br>` : ''}
+                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Peringatan: Foto ini belum dirilis resmi oleh pemilik asli (${registeredOwner.device_id}) namun telah diaudit dari kanal publik!</span><br>` : ''}
 
                     <div class="distribution-box">
                         <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
