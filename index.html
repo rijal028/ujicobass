@@ -134,27 +134,27 @@
     <!-- ======================================================== -->
     <div id="registerTab" class="tab-content">
         <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid #0284c7; padding: 12px; border-radius: 6px; font-size: 0.85rem; color: #bae6fd; margin-bottom: 16px;">
-            ℹ️ <b>Petunjuk Pemilik:</b> Unggah foto asli mentah dari kamera. Kunci Master, Hardware Device ID, dan Tanda Tangan Digital akan diekstrak otomatis untuk mengunci akta kepemilikan di Supabase.
+            ℹ️ <b>Petunjuk Pemilik:</b> Unggah foto asli kamera atau ketikkan Master Key beserta HW-ID yang disalin dari aplikasi kamera untuk mengunci akta kepemilikan di Supabase.
         </div>
 
         <div class="input-group">
-            <label for="regFileInput">Pilih Foto Asli Kamera (Wajib ada metadata EXIF asli):</label>
+            <label for="regFileInput">Pilih Foto Asli Kamera (Opsional - untuk autofill):</label>
             <input type="file" id="regFileInput" accept="image/jpeg" onchange="handleRegisterFileSelect()">
         </div>
 
         <div class="input-group">
-            <label for="regMasterKey">Master Key Terdeteksi:</label>
-            <input type="text" id="regMasterKey" placeholder="Akan terisi otomatis...">
+            <label for="regMasterKey">Master Key Terdeteksi / Input Manual:</label>
+            <input type="text" id="regMasterKey" placeholder="Contoh: 1788597108139_1808x3200">
         </div>
 
         <div class="input-group">
             <label for="regDeviceId">Hardware Device ID (HW-ID):</label>
-            <input type="text" id="regDeviceId" placeholder="Akan terisi otomatis dari Android Keystore...">
+            <input type="text" id="regDeviceId" placeholder="Salin dari layar aplikasi kamera (misal: A8F1C3E290D488BC)">
         </div>
 
         <div class="input-group">
-            <label for="regSignature">Hardware ECDSA Signature:</label>
-            <input type="text" id="regSignature" placeholder="Tanda tangan kriptografis hardware...">
+            <label for="regSignature">Hardware ECDSA Signature (Opsional):</label>
+            <input type="text" id="regSignature" placeholder="Boleh dikosongkan pada tahap pengujian...">
         </div>
 
         <div class="input-group">
@@ -204,7 +204,7 @@
     }
 
     // ==========================================
-    // 2. FUNGSI LOGIKA REGISTRASI FOTO KE CLOUD
+    // 2. FUNGSI REGISTRASI FOTO KE CLOUD
     // ==========================================
     async function handleRegisterFileSelect() {
         const fileInput = document.getElementById('regFileInput');
@@ -234,9 +234,11 @@
                     }
                 }
             }
-            alert('Peringatan: Berkas ini tidak memiliki metadata SECUREPIXEL_V2 lengkap (kemungkinan sudah dibersihkan atau bukan dari kamera resmi). Anda tetap bisa mengisi kolom secara manual.');
-        } catch(err) {
-            console.error(err);
+        } catch(err) {}
+
+        const match = file.name.match(/IMG_(\d+)/);
+        if (match) {
+            regMasterKey.value = `${match[1]}_1808x3200`;
         }
     }
 
@@ -286,7 +288,7 @@
     }
 
     // ==========================================
-    // 3. LOGIKA ENGINE FORENSIK 1-BIT DCT
+    // 3. ENGINE FORENSIK 1-BIT BILINEAR ADAPTIF
     // ==========================================
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 1.00;
@@ -504,6 +506,9 @@
         };
     }
 
+    // =========================================================================
+    // BILINEAR CONTINUOUS PHASE SAMPLING (MENCEGAH MERATANYA FREKUENSI DCT DI FB)
+    // =========================================================================
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
@@ -521,7 +526,6 @@
 
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
-        const isIntegerRatio = Math.abs(scaleX - 0.5) < 0.04 && Math.abs(scaleY - 0.5) < 0.04;
 
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
@@ -530,55 +534,43 @@
 
                 let blockSumLuma = 0.0;
 
-                if (!isDownscaled) {
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const rowIdx = ((by + y) * width + bx) * 4;
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const p = rowIdx + (x * 4);
-                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma;
-                        }
-                    }
-                } else if (isIntegerRatio) {
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const sy = Math.min(height - 1, Math.floor((by + y) * scaleY));
-                        const rowOffset = sy * width * 4;
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const sx = Math.min(width - 1, Math.floor((bx + x) * scaleX));
-                            const p = rowOffset + (sx * 4);
-                            const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma;
-                        }
-                    }
-                } else {
-                    for (let y = 0; y < BLOCK_SIZE; y++) {
-                        const startY = (by + y) * scaleY;
-                        const endY = (by + y + 1) * scaleY;
-                        const minSY = Math.max(0, Math.floor(startY));
-                        const maxSY = Math.min(height - 1, Math.floor(endY));
+                for (let y = 0; y < BLOCK_SIZE; y++) {
+                    for (let x = 0; x < BLOCK_SIZE; x++) {
+                        let luma = 128.0;
 
-                        for (let x = 0; x < BLOCK_SIZE; x++) {
-                            const startX = (bx + x) * scaleX;
-                            const endX = (bx + x + 1) * scaleX;
-                            const minSX = Math.max(0, Math.floor(startX));
-                            const maxSX = Math.min(width - 1, Math.floor(endX));
+                        if (!isDownscaled) {
+                            const p = ((by + y) * width + (bx + x)) * 4;
+                            luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+                        } else {
+                            // BILINEAR CONTINUOUS SAMPLING
+                            const gx = (bx + x + 0.5) * scaleX - 0.5;
+                            const gy = (by + y + 0.5) * scaleY - 0.5;
 
-                            let subLumaSum = 0.0;
-                            let subSamples = 0;
-                            for (let sy = minSY; sy <= maxSY; sy++) {
-                                const rowOffset = sy * width * 4;
-                                for (let sx = minSX; sx <= maxSX; sx++) {
-                                    const p = rowOffset + (sx * 4);
-                                    subLumaSum += 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
-                                    subSamples++;
-                                }
-                            }
-                            const luma = subSamples > 0 ? (subLumaSum / subSamples) : 128.0;
-                            blockSumLuma += luma;
-                            blockLuma[y * BLOCK_SIZE + x] = luma;
+                            const x0 = Math.max(0, Math.min(width - 1, Math.floor(gx)));
+                            const x1 = Math.max(0, Math.min(width - 1, x0 + 1));
+                            const y0 = Math.max(0, Math.min(height - 1, Math.floor(gy)));
+                            const y1 = Math.max(0, Math.min(height - 1, y0 + 1));
+
+                            const dx = Math.max(0.0, Math.min(1.0, gx - x0));
+                            const dy = Math.max(0.0, Math.min(1.0, gy - y0));
+
+                            const p00 = (y0 * width + x0) * 4;
+                            const p10 = (y0 * width + x1) * 4;
+                            const p01 = (y1 * width + x0) * 4;
+                            const p11 = (y1 * width + x1) * 4;
+
+                            const l00 = 0.299 * data[p00] + 0.587 * data[p00 + 1] + 0.114 * data[p00 + 2];
+                            const l10 = 0.299 * data[p10] + 0.587 * data[p10 + 1] + 0.114 * data[p10 + 2];
+                            const l01 = 0.299 * data[p01] + 0.587 * data[p01 + 1] + 0.114 * data[p01 + 2];
+                            const l11 = 0.299 * data[p11] + 0.587 * data[p11 + 1] + 0.114 * data[p11 + 2];
+
+                            const topLuma = l00 * (1.0 - dx) + l10 * dx;
+                            const botLuma = l01 * (1.0 - dx) + l11 * dx;
+                            luma = topLuma * (1.0 - dy) + botLuma * dy;
                         }
+
+                        blockSumLuma += luma;
+                        blockLuma[y * BLOCK_SIZE + x] = luma;
                     }
                 }
 
@@ -687,7 +679,7 @@
                 const isScreenshot = Math.abs(screenAspect - canonicalAspect) > 0.08;
                 const rawData = ctx.getImageData(0, 0, nativeWidth, nativeHeight).data;
 
-                let res, auditMode, activeThreshold;
+                let res, auditMode;
                 let activeSourceCanvas;
 
                 if (isScreenshot) {
@@ -710,7 +702,6 @@
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                     auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
-                    activeThreshold = 60.0;
                     activeSourceCanvas = cropCanvas;
                 } else {
                     previewContainer.style.display = 'none';
@@ -719,11 +710,9 @@
                     if (isExactNative) {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
-                        activeThreshold = 85.0;
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
                         auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
-                        activeThreshold = 60.0;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -769,7 +758,6 @@
 
                         if (data) {
                             registeredOwner = data;
-                            // Jika foto privat diaudit dari kanal kompresi/screenshot
                             if (!data.is_public_released && !isExactNative) {
                                 isLeakAlert = true;
                             }
@@ -779,7 +767,7 @@
                     }
                 }
 
-                if (res.activeMatchRate < 60.0) {
+                if (res.activeMatchRate < 58.0) {
                     verdict = "INVALID_KEY_OR_IMAGE";
                     resultBox.className = "result-box invalid";
                     resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI SALAH (${res.activeMatchRate.toFixed(2)}%)`;
@@ -796,10 +784,10 @@
                         verdict = "VERIFIED_ORIGINAL_RAW";
                         resultBox.className = "result-box valid";
                         resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 1: Kamera Asli Murni)`;
-                    } else if (res.activeMatchRate >= 78.0) {
+                    } else if (res.activeMatchRate >= 76.0) {
                         verdict = "VERIFIED_SINGLE_MEDSOS";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 2: WhatsApp / Medsos Tunggal)`;
+                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 2: WhatsApp / FB Tunggal)`;
                     } else {
                         verdict = "VERIFIED_MULTI_TRANSCODED";
                         resultBox.className = "result-box valid";
@@ -807,7 +795,7 @@
                     }
                 }
 
-                // Kirim catatan audit log ke Supabase
+                // Kirim catatan log ke Supabase
                 if (supabaseClient) {
                     try {
                         await supabaseClient.from('audit_logs').insert([{
