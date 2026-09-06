@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SecurePixel Forensic & Ownership Hub</title>
+    <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- ExifReader for reading HW-ID & Signature metadata -->
     <script src="https://cdn.jsdelivr.net/npm/exifreader@4.20.0/dist/exif-reader.min.js"></script>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -12,6 +14,7 @@
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 860px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.3rem; margin-top: 0; color: #38bdf8; text-align: center; }
         
+        /* Tab Navigation */
         .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
         .tab-btn { flex: 1; padding: 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #94a3b8; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .tab-btn.active { background: #0284c7; color: #fff; border-color: #38bdf8; }
@@ -60,43 +63,46 @@
 <div class="card">
     <h1>SecurePixel Forensic & Ownership Hub</h1>
 
+    <!-- Tab Bar -->
     <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab('auditTab')">🔍 Audit Forensik & Verifikasi</button>
-        <button class="tab-btn" onclick="switchTab('registerTab')">🛡️ Daftarkan Kepemilikan (Pemilik Asli)</button>
+        <button class="tab-btn active" onclick="switchTab('auditTab')">🔍 Forensic Audit & Verification</button>
+        <button class="tab-btn" onclick="switchTab('registerTab')">🛡️ Register Ownership (Original Owner)</button>
     </div>
 
-    <!-- TAB 1: AUDIT & VERIFIKASI -->
+    <!-- ======================================================== -->
+    <!-- TAB 1: AUDIT & VERIFICATION                              -->
+    <!-- ======================================================== -->
     <div id="auditTab" class="tab-content active">
         <div class="input-group">
-            <label for="imageInput">Pilih Berkas Citra (Asli Kamera / Medsos / Screenshot):</label>
+            <label for="imageInput">Select Image File (Raw Camera / Social Media / Screenshot):</label>
             <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" onchange="autoDetectKeyFromName()">
         </div>
 
         <div class="input-group">
-            <label for="keyInput">Master Key (Terdeteksi otomatis atau input manual):</label>
-            <input type="text" id="keyInput" placeholder="Contoh: 1788597108139_1808x3200">
+            <label for="keyInput">Master Key (Auto-detected or manual input):</label>
+            <input type="text" id="keyInput" placeholder="e.g. 1788597108139_1808x3200">
         </div>
 
         <div class="btn-group">
-            <button class="btn-verify" onclick="processEngine()">Audit Integritas Forensik 1-Bit</button>
+            <button class="btn-verify" onclick="processEngine()">Audit 1-Bit Forensic Integrity</button>
         </div>
 
         <div id="previewContainer" class="preview-box">
-            <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Area Screenshot Terpotong Geometri Simetris:</span><br>
+            <span style="font-size: 0.8rem; color: #38bdf8; font-weight: bold;">Symmetrically Cropped Screenshot Region:</span><br>
             <img id="cropPreview" class="preview-img" alt="Cropped preview">
         </div>
 
         <div id="heatmapContainer" class="heatmap-wrapper">
-            <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Peta Panas Integritas Spasial (1-Bit Gold Pair)</div>
+            <div style="font-weight: bold; font-size: 0.95rem; color: #38bdf8; margin-bottom: 4px;">Spatial Integrity Heatmap (1-Bit Gold Pair)</div>
             
             <div class="controls-row">
                 <label>
                     <input type="radio" name="heatmapMode" value="defects_only" checked onchange="switchHeatmapMode(this.value)">
-                    <b>Sorot Area Cacat / Coretan Saja</b>
+                    <b>Highlight Damaged / Tampered Blocks Only</b>
                 </label>
                 <label>
                     <input type="radio" name="heatmapMode" value="full_grid" onchange="switchHeatmapMode(this.value)">
-                    Tampilkan Seluruh Grid
+                    Display Full Grid
                 </label>
             </div>
 
@@ -106,7 +112,7 @@
             </div>
 
             <div class="controls-row">
-                <span>Transparansi Kerusakan:</span>
+                <span>Damage Overlay Opacity:</span>
                 <input type="range" id="opacitySlider" min="0.2" max="1" step="0.05" value="0.85" oninput="updateHeatmapOpacity(this.value)">
                 <span id="opacityVal">85%</span>
             </div>
@@ -117,48 +123,50 @@
             <div id="resultMeta" class="meta-info"></div>
 
             <div class="fingerprint-box">
-                <b>Payload Audit Supabase (JSON):</b><br>
+                <b>Supabase Audit Payload (JSON):</b><br>
                 <pre id="jsonPayload" class="fingerprint-val" style="margin: 6px 0; white-space: pre-wrap;"></pre>
             </div>
         </div>
     </div>
 
-    <!-- TAB 2: DAFTARKAN KEPEMILIKAN BARU -->
+    <!-- ======================================================== -->
+    <!-- TAB 2: REGISTER OWNERSHIP                                -->
+    <!-- ======================================================== -->
     <div id="registerTab" class="tab-content">
         <div style="background: rgba(2, 132, 199, 0.1); border: 1px solid #0284c7; padding: 12px; border-radius: 6px; font-size: 0.85rem; color: #bae6fd; margin-bottom: 16px;">
-            ℹ️ <b>Petunjuk Pemilik:</b> Unggah foto asli kamera atau ketikkan Master Key beserta HW-ID yang disalin dari aplikasi kamera untuk mengunci akta kepemilikan di Supabase.
+            ℹ️ <b>Owner Instructions:</b> Upload the original raw camera photo or enter the Master Key along with the HW-ID copied from the camera app to seal ownership records on Supabase.
         </div>
 
         <div class="input-group">
-            <label for="regFileInput">Pilih Foto Asli Kamera (Opsional - untuk autofill):</label>
+            <label for="regFileInput">Select Raw Camera Photo (Optional - for autofill):</label>
             <input type="file" id="regFileInput" accept="image/jpeg" onchange="handleRegisterFileSelect()">
         </div>
 
         <div class="input-group">
-            <label for="regMasterKey">Master Key Terdeteksi / Input Manual:</label>
-            <input type="text" id="regMasterKey" placeholder="Contoh: 1788597108139_1808x3200">
+            <label for="regMasterKey">Detected / Manual Master Key:</label>
+            <input type="text" id="regMasterKey" placeholder="e.g. 1788597108139_1808x3200">
         </div>
 
         <div class="input-group">
             <label for="regDeviceId">Hardware Device ID (HW-ID):</label>
-            <input type="text" id="regDeviceId" placeholder="Salin dari layar aplikasi kamera (misal: A8F1C3E290D488BC)">
+            <input type="text" id="regDeviceId" placeholder="Copy from camera app screen (e.g. A8F1C3E290D488BC)">
         </div>
 
         <div class="input-group">
-            <label for="regSignature">Hardware ECDSA Signature (Opsional):</label>
-            <input type="text" id="regSignature" placeholder="Boleh dikosongkan pada tahap pengujian...">
+            <label for="regSignature">Hardware ECDSA Signature (Optional):</label>
+            <input type="text" id="regSignature" placeholder="Can be left empty during testing...">
         </div>
 
         <div class="input-group">
-            <label for="regStatus">Status Rilis Media:</label>
+            <label for="regStatus">Media Release Status:</label>
             <select id="regStatus">
-                <option value="false">🔒 Private (Kirim Peringatan Kebocoran jika beredar di Medsos/Luar)</option>
-                <option value="true">🌐 Public (Foto diizinkan disebar & diaudit bebas)</option>
+                <option value="false">🔒 Private (Trigger Leak Alert if audited from public/social channels)</option>
+                <option value="true">🌐 Public (Authorized for free redistribution & auditing)</option>
             </select>
         </div>
 
         <div class="btn-group">
-            <button class="btn-register" onclick="registerPhotoToCloud()">Daftarkan Hak Kepemilikan ke Supabase</button>
+            <button class="btn-register" onclick="registerPhotoToCloud()">Register Ownership to Supabase</button>
         </div>
 
         <div id="regResultBox" class="result-box" style="margin-top: 16px;"></div>
@@ -168,15 +176,18 @@
 <canvas id="canvas" style="display: none;"></canvas>
 
 <script>
+    // ==========================================
+    // 1. SUPABASE CLIENT CONFIGURATION
+    // ==========================================
     const SUPABASE_URL = "https://rrfgkzgrendiibkxtamx.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyZmdremdyZW5kaWlia3h0YW14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2Njk4ODQsImV4cCI6MjEwNDI0NTg4NH0.34k6GGwUNg0GgprPHU125aUwRBSyE4nYH6xAthRhj_0";
     
     let supabaseClient = null;
     try {
         supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        console.log("Supabase Client siap digunakan!");
+        console.log("Supabase Client initialized successfully!");
     } catch(e) {
-        console.warn("Koneksi Supabase gagal:", e);
+        console.warn("Failed to initialize Supabase Client:", e);
     }
 
     function switchTab(tabId) {
@@ -192,6 +203,9 @@
         }
     }
 
+    // ==========================================
+    // 2. CLOUD OWNERSHIP REGISTRATION
+    // ==========================================
     async function handleRegisterFileSelect() {
         const fileInput = document.getElementById('regFileInput');
         const regMasterKey = document.getElementById('regMasterKey');
@@ -236,12 +250,12 @@
         const regBox = document.getElementById('regResultBox');
 
         if (!masterKey || !deviceId) {
-            alert('Master Key dan Hardware Device ID wajib diisi!');
+            alert('Master Key and Hardware Device ID are required!');
             return;
         }
 
         if (!supabaseClient) {
-            alert('Supabase client belum terhubung!');
+            alert('Supabase client is not connected!');
             return;
         }
 
@@ -260,18 +274,22 @@
             regBox.className = "result-box valid";
             regBox.style.display = 'block';
             regBox.innerHTML = `
-                <b>✅ Berhasil Didaftarkan ke Supabase!</b><br>
+                <b>✅ Successfully Registered to Supabase!</b><br>
                 <b>Master Key:</b> ${masterKey}<br>
-                <b>Terikat ke Device ID:</b> ${deviceId}<br>
-                <b>Status Privasi:</b> ${isPublic ? '🌐 Public (Bebas sebar)' : '🔒 Private (Proteksi Kebocoran Aktif)'}
+                <b>Bound to Device ID:</b> ${deviceId}<br>
+                <b>Privacy Status:</b> ${isPublic ? '🌐 Public (Free redistribution)' : '🔒 Private (Leak Detection Active)'}<br>
+                <i>Digital ownership birth certificate sealed in cloud.</i>
             `;
         } catch(err) {
             regBox.className = "result-box invalid";
             regBox.style.display = 'block';
-            regBox.innerHTML = `<b>Gagal Registrasi:</b> ${err.message}`;
+            regBox.innerHTML = `<b>Registration Failed:</b> ${err.message}`;
         }
     }
 
+    // ==========================================
+    // 3. 1-BIT FORENSIC DCT ENGINE
+    // ==========================================
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 1.00;
 
@@ -441,6 +459,9 @@
         renderHeatmapLayer(parseFloat(val));
     }
 
+    // =========================================================================
+    // ADAPTIVE CLUSTER DETECTION (FILTERING OUT EXTREME LUMA FALSE POSITIVES)
+    // =========================================================================
     function detectTamperClusters(macroblockMap, targetWidth, targetHeight, activeMatchRate, isCompressedChannel) {
         const cols = targetWidth / BLOCK_SIZE;
         const rows = targetHeight / BLOCK_SIZE;
@@ -450,8 +471,13 @@
             const c = Math.floor(blk.x / BLOCK_SIZE);
             const r = Math.floor(blk.y / BLOCK_SIZE);
             if (r < rows && c < cols) {
-                if (blk.type === 'active') grid[r][c] = blk.matches;
-                else if (blk.type === 'dark_sealed_tampered') grid[r][c] = 0;
+                if (blk.type === 'active') {
+                    // Tolerance: Do not count mismatch as localized tampering if sitting near extreme borders
+                    const isNearExtreme = isCompressedChannel && (blk.avgLuma < 28.0 || blk.avgLuma > 228.0);
+                    grid[r][c] = (blk.matches === 0 && isNearExtreme) ? 1 : blk.matches;
+                } else if (blk.type === 'dark_sealed_tampered') {
+                    grid[r][c] = 0;
+                }
             }
         });
 
@@ -485,7 +511,7 @@
             adaptiveThreshold = 5;
         } else {
             const naturalErrorRate = (100.0 - activeMatchRate) / 100.0;
-            adaptiveThreshold = Math.min(24, Math.round(naturalErrorRate * 25 + 12));
+            adaptiveThreshold = Math.min(24, Math.round(naturalErrorRate * 25 + 14));
         }
 
         return {
@@ -497,7 +523,7 @@
     }
 
     // =========================================================================
-    // ENGINE UTAMA: MURNI 1-KE-1 PER MAKROBLOK KANONIKAL
+    // CORE 1-TO-1 CANONICAL DCT ENGINE WITH DYNAMIC LUMA BOUNDARIES
     // =========================================================================
     function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
@@ -514,9 +540,13 @@
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
-        // Skala koordinat kanonikal -> citra saat ini
+        // Canonical-to-current coordinate scale
         const scaleX = width / targetWidth;
         const scaleY = height / targetHeight;
+
+        // Dynamic buffer thresholds to prevent false alarms on compressed extreme blocks
+        const minLumaThreshold = !isDownscaled ? 15.0 : 22.0;
+        const maxLumaThreshold = !isDownscaled ? 240.0 : 233.0;
 
         for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
             for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
@@ -526,7 +556,7 @@
                 let blockSumLuma = 0.0;
 
                 for (let y = 0; y < BLOCK_SIZE; y++) {
-                    // Gunakan fasa tengah (+0.5) untuk mencegah pemotongan desimal kumulatif
+                    // Continuous sub-pixel phase center (+0.5) avoids cumulative integer drift
                     const sy = !isDownscaled 
                         ? (by + y) 
                         : Math.min(height - 1, Math.floor((by + y + 0.5) * scaleY));
@@ -546,7 +576,7 @@
                 }
 
                 const avgLuma = blockSumLuma / totalPixelsPerBlock;
-                const isLumaSafe = (avgLuma >= 15.0 && avgLuma <= 240.0);
+                const isLumaSafe = (avgLuma >= minLumaThreshold && avgLuma <= maxLumaThreshold);
 
                 for (let i = 0; i < totalPixelsPerBlock; i++) {
                     blockLuma[i] -= 128.0;
@@ -573,7 +603,8 @@
                         x: bx,
                         y: by,
                         type: 'active',
-                        matches: matched ? 1 : 0
+                        matches: matched ? 1 : 0,
+                        avgLuma: avgLuma
                     });
 
                 } else {
@@ -584,7 +615,8 @@
                                 x: bx,
                                 y: by,
                                 type: 'dark_sealed_tampered',
-                                matches: 0
+                                matches: 0,
+                                avgLuma: avgLuma
                             });
                             count0++;
                         }
@@ -593,7 +625,8 @@
                             x: bx,
                             y: by,
                             type: 'skipped',
-                            matches: -1
+                            matches: -1,
+                            avgLuma: avgLuma
                         });
                     }
                 }
@@ -623,7 +656,7 @@
         const heatmapContainer = document.getElementById('heatmapContainer');
 
         if (!rawKeyInput || !fileInput.files[0]) {
-            alert('Pilih berkas citra dan pastikan Master Key terisi!');
+            alert('Please select an image file and ensure Master Key is filled!');
             return;
         }
 
@@ -672,7 +705,7 @@
 
                     const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
                     res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                    auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
+                    auditMode = `Symmetrically Cropped Screenshot (${bounds.w}x${bounds.h})`;
                     activeSourceCanvas = cropCanvas;
                 } else {
                     previewContainer.style.display = 'none';
@@ -680,10 +713,10 @@
 
                     if (isExactNative) {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
-                        auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
+                        auditMode = `Raw Camera Original (${nativeWidth}x${nativeHeight})`;
                     } else {
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
+                        auditMode = `Compressed WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Canonical ${canonicalWidth}x${canonicalHeight})`;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -718,6 +751,9 @@
                 );
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
 
+                // ==========================================
+                // 3-TIER POLICY EVALUATION & REGISTRY CHECK
+                // ==========================================
                 let verdict = "UNKNOWN";
                 let registeredOwner = null;
                 let isLeakAlert = false;
@@ -737,38 +773,39 @@
                             }
                         }
                     } catch(err) {
-                        console.error("Gagal verifikasi Supabase:", err);
+                        console.error("Failed to query Supabase registry:", err);
                     }
                 }
 
                 if (res.activeMatchRate < 58.0) {
                     verdict = "INVALID_KEY_OR_IMAGE";
                     resultBox.className = "result-box invalid";
-                    resultTitle.innerHTML = `🔴 BUKAN KAMERA RESMI / KUNCI SALAH (${res.activeMatchRate.toFixed(2)}%)`;
+                    resultTitle.innerHTML = `🔴 NOT AN OFFICIAL CAMERA / INVALID KEY (${res.activeMatchRate.toFixed(2)}%)`;
                 } else if (isLocalTampered) {
                     verdict = "TAMPER_DETECTED";
                     resultBox.className = "result-box tampered";
-                    resultTitle.innerHTML = `🟡 CORETAN / MANIPULASI MIKRO TERDETEKSI! (${res.count0} blok rusak, Peak: ${clusterAnalysis.maxLocalDamageCluster}/${clusterAnalysis.thresholdUsed})`;
+                    resultTitle.innerHTML = `🟡 LOCAL TAMPERING / DOODLE DETECTED! (${res.count0} damaged blocks, Peak: ${clusterAnalysis.maxLocalDamageCluster}/${clusterAnalysis.thresholdUsed})`;
                 } else if (isLeakAlert) {
                     verdict = "UNAUTHORIZED_LEAK";
                     resultBox.className = "result-box leak";
-                    resultTitle.innerHTML = `⚠️ PERINGATAN KEBOCORAN / REPOST TIDAK RESMI! (${res.activeMatchRate.toFixed(2)}%)`;
+                    resultTitle.innerHTML = `⚠️ UNAUTHORIZED LEAK WARNING! (${res.activeMatchRate.toFixed(2)}%)`;
                 } else {
                     if (res.activeMatchRate >= 95.0) {
                         verdict = "VERIFIED_ORIGINAL_RAW";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 1: Kamera Asli Murni)`;
+                        resultTitle.innerHTML = `🟢 AUTHENTIC & VERIFIED (Tier 1: Pure Raw Camera)`;
                     } else if (res.activeMatchRate >= 76.0) {
                         verdict = "VERIFIED_SINGLE_MEDSOS";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 2: WhatsApp / FB Tunggal)`;
+                        resultTitle.innerHTML = `🟢 AUTHENTIC & VERIFIED (Tier 2: Single WhatsApp / Facebook)`;
                     } else {
                         verdict = "VERIFIED_MULTI_TRANSCODED";
                         resultBox.className = "result-box valid";
-                        resultTitle.innerHTML = `🟢 ASLI & TERVERIFIKASI (Tier 3: Kompresi Bertingkat WA &rarr; FB)`;
+                        resultTitle.innerHTML = `🟢 AUTHENTIC & VERIFIED (Tier 3: Multi-Transcoded WA &rarr; FB)`;
                     }
                 }
 
+                // Log audit trail to Supabase
                 if (supabaseClient) {
                     try {
                         await supabaseClient.from('audit_logs').insert([{
@@ -781,7 +818,7 @@
                             client_device_id: detectedHWInfo.deviceId || "UNKNOWN"
                         }]);
                     } catch(err) {
-                        console.error("Gagal mencatat audit log:", err);
+                        console.error("Failed to insert audit log:", err);
                     }
                 }
 
@@ -792,24 +829,24 @@
                 resultMeta.innerHTML = `
                     <b>Master Key:</b> ${rawKeyInput}<br>
                     <b>Hardware Binding:</b> ${registeredOwner 
-                        ? `<span style="color: #38bdf8; font-weight: bold;">Terdaftar Resmi (Owner HW-ID: ${registeredOwner.device_id})</span>` 
-                        : '<span style="color: #94a3b8;">Belum terdaftar di registry publik</span>'}<br>
-                    <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
-                    <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
-                    <b>Analisis Spasial:</b> ${isLocalTampered 
-                        ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul, melebihi batas toleransi ${clusterAnalysis.thresholdUsed})!</span>` 
-                        : `<span style="color: #34d399;">Kerusakan menyebar wajar (Peak: ${clusterAnalysis.maxLocalDamageCluster}, batas toleransi aman: ${clusterAnalysis.thresholdUsed})</span>`}<br>
-                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Peringatan: Foto ini berstatus PRIVATE oleh pemilik asli (${registeredOwner.device_id}) namun ditemukan diaudit dari kanal publik!</span><br>` : ''}
+                        ? `<span style="color: #38bdf8; font-weight: bold;">Registered Owner (HW-ID: ${registeredOwner.device_id})</span>` 
+                        : '<span style="color: #94a3b8;">Unregistered in public registry</span>'}<br>
+                    <b>Audit Mode:</b> ${auditMode}<br>
+                    <b>Active Layer (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blocks (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blocks naturally sealed<br>
+                    <b>Spatial Cluster Analysis:</b> ${isLocalTampered 
+                        ? `<span style="color: #f87171; font-weight: bold;">Dense damage cluster detected at X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} adjacent damaged blocks exceeding tolerance ${clusterAnalysis.thresholdUsed})!</span>` 
+                        : `<span style="color: #34d399;">Evenly distributed degradation (Peak: ${clusterAnalysis.maxLocalDamageCluster}, Safe Tolerance: ${clusterAnalysis.thresholdUsed})</span>`}<br>
+                    ${isLeakAlert ? `<span style="color: #fbbf24; font-weight: bold;">🚨 Alert: This image is marked PRIVATE by owner (${registeredOwner.device_id}) but was audited from a public channel!</span><br>` : ''}
 
                     <div class="distribution-box">
-                        <b>Kesehatan Makroblok (${totalBlk.toLocaleString()} blok):</b>
+                        <b>Macroblock Health (${totalBlk.toLocaleString()} blocks):</b>
                         <div class="bar-container">
-                            <div class="bar-100" style="width: ${p100}%;" title="100% Utuh"></div>
-                            <div class="bar-0" style="width: ${p0}%;" title="0% Rusak"></div>
+                            <div class="bar-100" style="width: ${p100}%;" title="100% Intact"></div>
+                            <div class="bar-0" style="width: ${p0}%;" title="0% Damaged"></div>
                         </div>
-                        <span style="color: #34d399;">■ Utuh: ${res.count100} (${p100}%)</span> | 
-                        <span style="color: #f87171; font-weight: bold;">■ Rusak (Kompresi/Tamper): ${res.count0} (${p0}%)</span>
+                        <span style="color: #34d399;">■ Intact: ${res.count100} (${p100}%)</span> | 
+                        <span style="color: #f87171; font-weight: bold;">■ Damaged (Compression/Tamper): ${res.count0} (${p0}%)</span>
                     </div>
                 `;
 
