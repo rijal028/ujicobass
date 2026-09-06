@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SecurePixel Forensic & Ownership Hub</title>
-    <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <!-- ExifReader untuk membaca metadata HW-ID & Signature -->
     <script src="https://cdn.jsdelivr.net/npm/exifreader@4.20.0/dist/exif-reader.min.js"></script>
     <style>
         * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
@@ -14,7 +12,6 @@
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; max-width: 860px; width: 100%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
         h1 { font-size: 1.3rem; margin-top: 0; color: #38bdf8; text-align: center; }
         
-        /* Tab Navigation */
         .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
         .tab-btn { flex: 1; padding: 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #94a3b8; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .tab-btn.active { background: #0284c7; color: #fff; border-color: #38bdf8; }
@@ -63,7 +60,6 @@
 <div class="card">
     <h1>SecurePixel Forensic & Ownership Hub</h1>
 
-    <!-- Navigasi Tab -->
     <div class="tab-bar">
         <button class="tab-btn active" onclick="switchTab('auditTab')">🔍 Audit Forensik & Verifikasi</button>
         <button class="tab-btn" onclick="switchTab('registerTab')">🛡️ Daftarkan Kepemilikan (Pemilik Asli)</button>
@@ -172,9 +168,6 @@
 <canvas id="canvas" style="display: none;"></canvas>
 
 <script>
-    // ==========================================
-    // 1. KONFIGURASI SUPABASE AKTIF
-    // ==========================================
     const SUPABASE_URL = "https://rrfgkzgrendiibkxtamx.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJyZmdremdyZW5kaWlia3h0YW14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg2Njk4ODQsImV4cCI6MjEwNDI0NTg4NH0.34k6GGwUNg0GgprPHU125aUwRBSyE4nYH6xAthRhj_0";
     
@@ -199,9 +192,6 @@
         }
     }
 
-    // ==========================================
-    // 2. FUNGSI REGISTRASI FOTO KE CLOUD
-    // ==========================================
     async function handleRegisterFileSelect() {
         const fileInput = document.getElementById('regFileInput');
         const regMasterKey = document.getElementById('regMasterKey');
@@ -273,8 +263,7 @@
                 <b>✅ Berhasil Didaftarkan ke Supabase!</b><br>
                 <b>Master Key:</b> ${masterKey}<br>
                 <b>Terikat ke Device ID:</b> ${deviceId}<br>
-                <b>Status Privasi:</b> ${isPublic ? '🌐 Public (Bebas sebar)' : '🔒 Private (Proteksi Kebocoran Aktif)'}<br>
-                <i>Foto ini sekarang memiliki akta kelahiran digital resmi di cloud.</i>
+                <b>Status Privasi:</b> ${isPublic ? '🌐 Public (Bebas sebar)' : '🔒 Private (Proteksi Kebocoran Aktif)'}
             `;
         } catch(err) {
             regBox.className = "result-box invalid";
@@ -283,9 +272,6 @@
         }
     }
 
-    // ==========================================
-    // 3. ENGINE FORENSIK 1-BIT DCT
-    // ==========================================
     const BLOCK_SIZE = 16; 
     const CAMERA_SCATTER_RATIO = 1.00;
 
@@ -511,24 +497,11 @@
     }
 
     // =========================================================================
-    // DETEKTOR ADAPTIF DENGAN PRNG SUPERPOSITION MAPPING (SESUAI USULAN BRILIANMU)
+    // ENGINE UTAMA: MURNI 1-KE-1 PER MAKROBLOK KANONIKAL
     // =========================================================================
-    function runEngineCore(data, width, height, canonicalWidth, canonicalHeight, keyString, isDownscaled) {
+    function runEngineCore(data, width, height, targetWidth, targetHeight, keyString, isDownscaled) {
         const subSeed = deriveSubSeed(keyString, "PHOTO_DCT16");
         const rng = createPRNG(subSeed);
-
-        // 1. Bangun Peta Kanonikal Asli dari Master Seed (1808x3200)
-        const canCols = canonicalWidth / BLOCK_SIZE;
-        const canRows = canonicalHeight / BLOCK_SIZE;
-        const canonicalGrid = Array.from({length: canRows}, () => new Int8Array(canCols));
-
-        for (let r = 0; r < canRows; r++) {
-            for (let c = 0; c < canCols; c++) {
-                const isSelected = rng() <= CAMERA_SCATTER_RATIO;
-                const bit = rng() > 0.5 ? 1 : 0;
-                canonicalGrid[r][c] = isSelected ? (bit === 1 ? 1 : -1) : 0;
-            }
-        }
 
         let totalActiveAudited = 0;
         let matchedActiveBits = 0;
@@ -541,58 +514,32 @@
         const blockLuma = new Float64Array(totalPixelsPerBlock);
         const dctCoefficients = new Float64Array(totalPixelsPerBlock);
 
-        // Skala fisik citra saat ini terhadap kanonikal
-        const scaleX = canonicalWidth / width;
-        const scaleY = canonicalHeight / height;
+        // Skala koordinat kanonikal -> citra saat ini
+        const scaleX = width / targetWidth;
+        const scaleY = height / targetHeight;
 
-        // 2. Audit Blok Fisik 16x16 Riil pada Citra yang Sedang Diperiksa
-        for (let by = 0; by < height; by += BLOCK_SIZE) {
-            for (let bx = 0; bx < width; bx += BLOCK_SIZE) {
-                // Pastikan blok fisik muat 16x16 utuh di batas citra
-                if (bx + BLOCK_SIZE > width || by + BLOCK_SIZE > height) continue;
+        for (let by = 0; by < targetHeight; by += BLOCK_SIZE) {
+            for (let bx = 0; bx < targetWidth; bx += BLOCK_SIZE) {
+                const isSelected = rng() <= CAMERA_SCATTER_RATIO;
+                const expectedBit = rng() > 0.5 ? 1 : 0;
 
-                // Hitung rentang area kanonikal asli yang menyusut ke dalam blok fisik ini
-                const canStartX = bx * scaleX;
-                const canEndX = (bx + BLOCK_SIZE) * scaleX;
-                const canStartY = by * scaleY;
-                const canEndY = (by + BLOCK_SIZE) * scaleY;
-
-                // Hitung resultan superposisi bit-bit kanonikal yang melebur ke blok ini
-                let expectedSignalSum = 0.0;
-                let activeWeight = 0.0;
-
-                const minCol = Math.max(0, Math.floor(canStartX / BLOCK_SIZE));
-                const maxCol = Math.min(canCols - 1, Math.floor((canEndX - 1) / BLOCK_SIZE));
-                const minRow = Math.max(0, Math.floor(canStartY / BLOCK_SIZE));
-                const maxRow = Math.min(canRows - 1, Math.floor((canEndY - 1) / BLOCK_SIZE));
-
-                for (let r = minRow; r <= maxRow; r++) {
-                    const blockY0 = r * BLOCK_SIZE;
-                    const blockY1 = (r + 1) * BLOCK_SIZE;
-                    const overlapH = Math.max(0, Math.min(canEndY, blockY1) - Math.max(canStartY, blockY0));
-
-                    for (let c = minCol; c <= maxCol; c++) {
-                        const blockX0 = c * BLOCK_SIZE;
-                        const blockX1 = (c + 1) * BLOCK_SIZE;
-                        const overlapW = Math.max(0, Math.min(canEndX, blockX1) - Math.max(canStartX, blockX0));
-
-                        const overlapArea = overlapW * overlapH;
-                        const bitVal = canonicalGrid[r][c]; // +1, -1, atau 0
-
-                        if (bitVal !== 0) {
-                            expectedSignalSum += bitVal * overlapArea;
-                            activeWeight += overlapArea;
-                        }
-                    }
-                }
-
-                // Ambil piksel fisik 16x16 langsung dari citra (tanpa merusak frekuensi ortogonal)
                 let blockSumLuma = 0.0;
+
                 for (let y = 0; y < BLOCK_SIZE; y++) {
-                    const rowOffset = (by + y) * width * 4;
+                    // Gunakan fasa tengah (+0.5) untuk mencegah pemotongan desimal kumulatif
+                    const sy = !isDownscaled 
+                        ? (by + y) 
+                        : Math.min(height - 1, Math.floor((by + y + 0.5) * scaleY));
+                    const rowOffset = sy * width * 4;
+
                     for (let x = 0; x < BLOCK_SIZE; x++) {
-                        const p = rowOffset + ((bx + x) * 4);
+                        const sx = !isDownscaled 
+                            ? (bx + x) 
+                            : Math.min(width - 1, Math.floor((bx + x + 0.5) * scaleX));
+
+                        const p = rowOffset + (sx * 4);
                         const luma = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+
                         blockSumLuma += luma;
                         blockLuma[y * BLOCK_SIZE + x] = luma;
                     }
@@ -606,12 +553,7 @@
                 }
                 fastForwardDCT(blockLuma, dctCoefficients);
 
-                // Jika resultan sinyal dominan (tidak saling membatalkan murni 0)
-                const isSignalDominant = activeWeight > 0 && Math.abs(expectedSignalSum) > (activeWeight * 0.05);
-
-                if (isSignalDominant && isLumaSafe) {
-                    const expectedBit = expectedSignalSum > 0 ? 1 : 0;
-
+                if (isSelected && isLumaSafe) {
                     const c1 = dctCoefficients[2 * BLOCK_SIZE + 1];
                     const c2 = dctCoefficients[1 * BLOCK_SIZE + 2];
                     const diff1 = c1 - c2;
@@ -665,9 +607,7 @@
             totalGapEnergy,
             count100, count0,
             darkSealedCount,
-            macroblockMap,
-            effectiveAuditWidth: width,
-            effectiveAuditHeight: height
+            macroblockMap
         };
     }
 
@@ -717,21 +657,21 @@
                     const bounds = detectCenteredPhotoBounds(nativeWidth, nativeHeight, canonicalAspect);
 
                     const cropCanvas = document.createElement('canvas');
-                    cropCanvas.width = bounds.w;
-                    cropCanvas.height = bounds.h;
+                    cropCanvas.width = canonicalWidth;
+                    cropCanvas.height = canonicalHeight;
                     const cropCtx = cropCanvas.getContext('2d');
 
                     cropCtx.drawImage(
                         canvas,
                         bounds.x, bounds.y, bounds.w, bounds.h,
-                        0, 0, bounds.w, bounds.h
+                        0, 0, canonicalWidth, canonicalHeight
                     );
 
                     previewContainer.style.display = 'block';
                     cropPreview.src = cropCanvas.toDataURL('image/jpeg', 0.85);
 
-                    const croppedData = cropCtx.getImageData(0, 0, bounds.w, bounds.h).data;
-                    res = runEngineCore(croppedData, bounds.w, bounds.h, canonicalWidth, canonicalHeight, rawKeyInput, true);
+                    const croppedData = cropCtx.getImageData(0, 0, canonicalWidth, canonicalHeight).data;
+                    res = runEngineCore(croppedData, canonicalWidth, canonicalHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                     auditMode = `Screenshot Terpotong Simetris (${bounds.w}x${bounds.h})`;
                     activeSourceCanvas = cropCanvas;
                 } else {
@@ -742,9 +682,8 @@
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, false);
                         auditMode = `Foto Asli Kamera Murni (${nativeWidth}x${nativeHeight})`;
                     } else {
-                        // Audit Adaptif Langsung pada Dimensi Riil Berkas (Superposisi PRNG)
                         res = runEngineCore(rawData, nativeWidth, nativeHeight, canonicalWidth, canonicalHeight, rawKeyInput, true);
-                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Superposisi Kanonikal ${canonicalWidth}x${canonicalHeight})`;
+                        auditMode = `Terkonpresi WhatsApp/FB (${nativeWidth}x${nativeHeight} &rarr; Kanonikal ${canonicalWidth}x${canonicalHeight})`;
                     }
                     activeSourceCanvas = canvas;
                 }
@@ -754,13 +693,13 @@
                 const photoBase = document.getElementById('photoBaseCanvas');
                 const overlay = document.getElementById('heatmapOverlay');
 
-                photoBase.width = res.effectiveAuditWidth;
-                photoBase.height = res.effectiveAuditHeight;
-                overlay.width = res.effectiveAuditWidth;
-                overlay.height = res.effectiveAuditHeight;
+                photoBase.width = canonicalWidth;
+                photoBase.height = canonicalHeight;
+                overlay.width = canonicalWidth;
+                overlay.height = canonicalHeight;
 
                 const pbCtx = photoBase.getContext('2d');
-                pbCtx.drawImage(activeSourceCanvas, 0, 0, res.effectiveAuditWidth, res.effectiveAuditHeight);
+                pbCtx.drawImage(activeSourceCanvas, 0, 0, canonicalWidth, canonicalHeight);
 
                 heatmapContainer.style.display = 'block';
                 const initialOpacity = parseFloat(document.getElementById('opacitySlider').value);
@@ -770,19 +709,15 @@
 
                 const isExactNative = (nativeWidth === canonicalWidth && nativeHeight === canonicalHeight);
                 
-                // Evaluasi Kluster Dinamis Adaptif
                 const clusterAnalysis = detectTamperClusters(
                     res.macroblockMap, 
-                    res.effectiveAuditWidth, 
-                    res.effectiveAuditHeight, 
+                    canonicalWidth, 
+                    canonicalHeight, 
                     res.activeMatchRate, 
                     !isExactNative
                 );
                 const isLocalTampered = clusterAnalysis.isLocalTampered;
 
-                // ==========================================
-                // EVALUASI 3-TIER POLICY & CLOUD REGISTRY
-                // ==========================================
                 let verdict = "UNKNOWN";
                 let registeredOwner = null;
                 let isLeakAlert = false;
@@ -834,7 +769,6 @@
                     }
                 }
 
-                // Kirim catatan log ke Supabase
                 if (supabaseClient) {
                     try {
                         await supabaseClient.from('audit_logs').insert([{
@@ -861,7 +795,7 @@
                         ? `<span style="color: #38bdf8; font-weight: bold;">Terdaftar Resmi (Owner HW-ID: ${registeredOwner.device_id})</span>` 
                         : '<span style="color: #94a3b8;">Belum terdaftar di registry publik</span>'}<br>
                     <b>Mode Audit:</b> ${auditMode}<br>
-                    <b>Lapisan Aktif (Superposisi 1-Bit):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
+                    <b>Lapisan Aktif (1-Bit Gold Pair):</b> ${res.matchedActiveBits.toLocaleString()} / ${res.totalActiveAudited.toLocaleString()} blok (${res.activeMatchRate.toFixed(2)}%)<br>
                     <b>Dark & Highlight Seals:</b> ${res.darkSealedCount.toLocaleString()} blok dikunci alami<br>
                     <b>Analisis Spasial:</b> ${isLocalTampered 
                         ? `<span style="color: #f87171; font-weight: bold;">Terdeteksi kluster kerusakan padat di koordinat X:${clusterAnalysis.clusterCenter.x}, Y:${clusterAnalysis.clusterCenter.y} (${clusterAnalysis.maxLocalDamageCluster} blok rusak berkumpul, melebihi batas toleransi ${clusterAnalysis.thresholdUsed})!</span>` 
